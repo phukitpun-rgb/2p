@@ -16,3 +16,6 @@ samples/
 ## Rider / VS Code
 .idea/
 .vscode/
+
+## Local tooling installers (not part of the project)
+gh_*.msi
