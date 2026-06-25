@@ -182,6 +182,33 @@ does not crash.
 
 ---
 
+## Command-line extractor (`jmdextract`)
+
+For batch/headless use there is a small CLI in `tools/JmdExtract` that reuses the same Core
+scanner and extractor as the app. It is ideal for pulling textures out of the `J2m Data
+Format 1.0` files (~98% of a RayCity `data/` tree), which store **DDS textures in plaintext**.
+
+```cmd
+REM show header, size, SHA-256
+dotnet run --project tools/JmdExtract -c Release -- info  path\to\car.jmd
+
+REM scan and list embedded signatures (offset, size, confidence)
+dotnet run --project tools/JmdExtract -c Release -- list  path\to\car.jmd
+
+REM extract embedded files (DDS become real .dds; unknown carves are .bin)
+dotnet run --project tools/JmdExtract -c Release -- extract path\to\car.jmd [outDir]
+dotnet run --project tools/JmdExtract -c Release -- extract path\to\car.jmd outDir --all
+```
+
+By default `extract` keeps assets with a header-derived size (e.g. DDS) plus high-confidence
+matches, skipping noisy 2-byte-magic false positives; `--all` carves every signature. A
+`*_manifest.json` is written alongside the output. DDS sizes are computed from the real
+header so the carved `.dds` files are complete and openable.
+
+> **Honesty note:** `Xenon Data Format v4` files (e.g. `wheel.jmd`, `car.jmd`) use a packed
+> payload that is **not yet decoded** — `jmdextract` will report what it sees but cannot
+> extract genuine assets from them. See [docs/format-notes.md](docs/format-notes.md).
+
 ## Adding a real decoder in the future
 
 The whole point of the architecture is that you can add real decoders without touching the UI:

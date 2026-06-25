@@ -13,6 +13,13 @@ public sealed class ExtractionRequest
     public long EndOffset { get; init; }
 
     public string Type { get; init; } = "unknown_structured_binary";
+
+    /// <summary>
+    /// File extension (without dot) for the carved output. Defaults to "bin" so raw,
+    /// unverified carves are never mistaken for valid assets. Only set a real extension
+    /// (e.g. "dds") when the exact, complete file length is known from a parsed header.
+    /// </summary>
+    public string Extension { get; init; } = "bin";
 }
 
 public sealed class ExtractionOutcome
@@ -72,7 +79,8 @@ public sealed class RawBlockExtractor
             long size = end - start;
 
             string endLabel = req.EndOffset < 0 ? "EOF" : $"0x{end:X8}";
-            string fileName = $"{baseName}_{Sanitize(req.Name)}_0x{start:X8}_{endLabel}.bin";
+            string ext = string.IsNullOrWhiteSpace(req.Extension) ? "bin" : req.Extension.TrimStart('.');
+            string fileName = $"{baseName}_{Sanitize(req.Name)}_0x{start:X8}_{endLabel}.{ext}";
             string outPath = Path.Combine(outputDirectory, fileName);
 
             CopyRange(source, start, size, outPath, ct);

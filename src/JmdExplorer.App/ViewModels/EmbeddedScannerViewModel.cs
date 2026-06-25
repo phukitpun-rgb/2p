@@ -56,44 +56,100 @@ public sealed partial class EmbeddedScannerViewModel : ScanViewModelBase
         _messenger.Send(new NavigateToHexOffsetMessage(match.Offset, match.MagicBytes.Length));
     }
 
+    /// <summary>Maps a known signature type to a real file extension. Only used when the
+    /// exact, complete file size is known, so a carved file is never given a real
+    /// extension unless it is genuinely a complete asset.</summary>
+    private static string ExtensionFor(string type) => type switch
+    {
+        "DDS" => "dds",
+        "PNG" => "png",
+        "JPEG" => "jpg",
+        "BMP" => "bmp",
+        "WAV (RIFF)" => "wav",
+        "OGG" => "ogg",
+        "ZIP" => "zip",
+        _ => "bin"
+    };
+
+    private ExtractionRequest BuildRequest(EmbeddedSignatureMatch match)
+    {
+        bool sizeKnown = match.SizeEstimate is > 0;
+        long size = sizeKnown
+            ? match.SizeEstimate!.Value
+            // Unknown size: carve a conservative window so we never fabricate an asset.
+            : Math.Min(64 * 1024, Session.Context!.Length - match.Offset);
+
+        return new ExtractionRequest
+        {
+            Name = $"embedded_{match.Type}_0x{match.Offset:X}",
+            StartOffset = match.Offset,
+            EndOffset = match.Offset + size,
+            Type = $"embedded_signature:{match.Type}",
+            // Real extension only when the complete length was parsed from the header.
+            Extension = sizeKnown ? ExtensionFor(match.Type) : "bin"
+        };
+    }
+
     [RelayCommand]
     private void ExtractRaw(EmbeddedSignatureMatch? match)
     {
         if (match is null || Session.Context is null) return;
 
-        long size = match.SizeEstimate ?? 0;
-        if (size <= 0)
-        {
-            // Unknown size: extract a conservative window so we never fabricate an asset.
-            size = Math.Min(64 * 1024, Session.Context.Length - match.Offset);
-        }
-
-        string? folder = _dialogs.PickFolder("Choose output folder for raw block");
+        string? folder = _dialogs.PickFolder("Choose output folder for extracted file");
         if (folder is null) return;
 
         try
         {
-            var req = new ExtractionRequest
-            {
-                Name = $"embedded_{match.Type}",
-                StartOffset = match.Offset,
-                EndOffset = match.Offset + size,
-                Type = $"embedded_signature:{match.Type}"
-            };
             var outcome = _extractor.Extract(
-                Session.Context.FilePath, folder, new[] { req },
+                Session.Context.FilePath, folder, new[] { BuildRequest(match) },
                 Session.Format?.FormatName ?? "Unknown binary", Session.Context.Sha256);
 
             foreach (var f in outcome.BinFiles) Session.ExtractedFiles.Add(f);
+            bool complete = match.SizeEstimate is > 0;
             _dialogs.ShowMessage(
-                $"Carved {outcome.BinFiles.Count} raw block(s).\n\n" +
-                "Note: a signature is not proof of a complete, valid embedded file. " +
-                "The carved bytes are raw and unverified.",
-                "Raw extraction complete");
+                complete
+                    ? $"Extracted a complete {match.Type} ({match.SizeEstimate} bytes) using its parsed header size."
+                    : $"Carved {outcome.BinFiles.Count} raw block(s).\n\n" +
+                      "Note: a signature is not proof of a complete, valid embedded file. " +
+                      "The carved bytes are raw and unverified.",
+                "Extraction complete");
         }
         catch (Exception ex)
         {
             Logger.Error("Embedded extract failed", ex);
+            _dialogs.ShowMessage($"Extraction failed: {ex.Message}", "Error", isError: true);
+        }
+    }
+
+    /// <summary>Extracts every scanned signature in one pass. Complete-size matches
+    /// (e.g. DDS) become real assets; unknown-size matches are carved raw as .bin.</summary>
+    [RelayCommand]
+    private void ExtractAll()
+    {
+        if (Session.Context is null || Signatures.Count == 0) return;
+
+        string? folder = _dialogs.PickFolder("Choose output folder for all extracted files");
+        if (folder is null) return;
+
+        try
+        {
+            var requests = Signatures.Select(BuildRequest).ToList();
+            var outcome = _extractor.Extract(
+                Session.Context.FilePath, folder, requests,
+                Session.Format?.FormatName ?? "Unknown binary", Session.Context.Sha256);
+
+            foreach (var f in outcome.BinFiles) Session.ExtractedFiles.Add(f);
+            int complete = Signatures.Count(s => s.SizeEstimate is > 0);
+            _dialogs.ShowMessage(
+                $"Extracted {outcome.BinFiles.Count} file(s) to:\n{folder}\n\n" +
+                $"{complete} complete asset(s) with header-derived sizes; " +
+                $"{outcome.BinFiles.Count - complete} raw carve(s) as .bin.\n" +
+                "A manifest.json was written alongside the files.",
+                "Extract all complete");
+        }
+        catch (Exception ex)
+        {
+            Logger.Error("Extract-all failed", ex);
             _dialogs.ShowMessage($"Extraction failed: {ex.Message}", "Error", isError: true);
         }
     }

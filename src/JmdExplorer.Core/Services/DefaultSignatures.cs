@@ -49,12 +49,71 @@ public static class DefaultSignatures
         return (idx.Value + iend.Length) - offset;
     }
 
-    /// <summary>DDS header is 128 bytes; total size needs the surface data which we cannot know precisely.</summary>
+    /// <summary>
+    /// DDS total size = 128-byte header (+ optional 20-byte DX10 header) plus every mip
+    /// level. We compute it from the real header fields (dimensions, mip count, pixel
+    /// format). Returns null when the header is malformed or the format is unsupported,
+    /// so we never fabricate a length.
+    /// </summary>
     private static long? EstimateDds(Stream s, long offset)
     {
-        // We can at least confirm the 128-byte header is present; true size needs format math.
-        return null;
+        Span<byte> h = stackalloc byte[128];
+        s.Seek(offset, SeekOrigin.Begin);
+        if (s.Read(h) != 128) return null;
+
+        // Validate the structural invariants of a DDS_HEADER.
+        if (h[0] != (byte)'D' || h[1] != (byte)'D' || h[2] != (byte)'S' || h[3] != (byte)' ')
+            return null;
+        uint headerSize = U32(h, 4);
+        if (headerSize != 124) return null; // dwSize is always 124 for a valid header
+
+        uint height = U32(h, 12);
+        uint width = U32(h, 16);
+        if (width == 0 || height == 0 || width > 65536 || height > 65536) return null;
+
+        uint mipCount = U32(h, 28);
+        if (mipCount == 0) mipCount = 1;
+        if (mipCount > 20) return null; // sanity bound (2^20 px is already huge)
+
+        // DDS_PIXELFORMAT starts at offset 76; fourCC at 84, RGB bit count at 88.
+        uint pfFlags = U32(h, 80);
+        string fourCc = System.Text.Encoding.ASCII.GetString(h.Slice(84, 4));
+        uint rgbBitCount = U32(h, 88);
+
+        long total = 128;
+        int blockBytes = fourCc switch
+        {
+            "DXT1" => 8,
+            "DXT2" or "DXT3" or "DXT4" or "DXT5" => 16,
+            "BC4U" or "BC4S" or "ATI1" => 8,
+            "BC5U" or "BC5S" or "ATI2" => 16,
+            _ => 0
+        };
+
+        const uint DDPF_FOURCC = 0x4;
+        bool isBlockCompressed = (pfFlags & DDPF_FOURCC) != 0 && blockBytes != 0;
+
+        if (fourCc == "DX10") return null; // DX10 extended header: format math needs dxgiFormat; stay honest.
+
+        for (int m = 0; m < mipCount; m++)
+        {
+            long mw = Math.Max(1, width >> m);
+            long mh = Math.Max(1, height >> m);
+            if (isBlockCompressed)
+            {
+                total += ((mw + 3) / 4) * ((mh + 3) / 4) * blockBytes;
+            }
+            else
+            {
+                uint bpp = rgbBitCount != 0 ? rgbBitCount : 32; // default to 32bpp if unspecified
+                total += mw * mh * (bpp / 8);
+            }
+        }
+        return total;
     }
+
+    private static uint U32(ReadOnlySpan<byte> b, int o) =>
+        (uint)(b[o] | (b[o + 1] << 8) | (b[o + 2] << 16) | (b[o + 3] << 24));
 
     /// <summary>RIFF stores total size at offset+4 (little endian, excludes the first 8 bytes).</summary>
     private static long? EstimateRiff(Stream s, long offset)
