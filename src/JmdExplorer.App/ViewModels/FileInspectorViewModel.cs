@@ -78,11 +78,13 @@ public sealed partial class FileInspectorViewModel : ObservableObject, IPageView
             ? "Extraction result: Raw blocks only"
             : "Extraction result: Nothing extracted yet";
 
+        // Note: the generated `Confidence` string property shadows the Confidence enum
+        // type in this class, so the enum is fully qualified here.
         ConfidenceColorKey = fmt.Confidence switch
         {
-            Confidence.High => "BadgeGoodBrush",
-            Confidence.Medium => "BadgeWarnBrush",
-            Confidence.Low => "BadgeWarnBrush",
+            Core.Models.Confidence.High => "BadgeGoodBrush",
+            Core.Models.Confidence.Medium => "BadgeWarnBrush",
+            Core.Models.Confidence.Low => "BadgeWarnBrush",
             _ => "BadgeNeutralBrush"
         };
     }

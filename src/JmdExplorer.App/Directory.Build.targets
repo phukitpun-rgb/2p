@@ -1,0 +1,29 @@
+<Project>
+
+  <!--
+    Workaround for a WPF + Roslyn source-generator packaging issue.
+
+    WPF's XAML markup-compilation step builds a temporary "<project>_xxxxx_wpftmp.csproj"
+    in this folder. For multi-targeted analyzer packages (CommunityToolkit.Mvvm ships a
+    roslyn4.0 AND a roslyn4.3 build of its source generator), that temp project ends up
+    referencing BOTH variants. Both generators then run and emit every
+    [ObservableProperty] / [RelayCommand] member twice -> CS0102 / CS0111 / CS0756.
+
+    Because the temp project is created in this directory it auto-imports this
+    Directory.Build.targets. Just before CoreCompile we (1) collapse exact-duplicate
+    @(Analyzer) items and (2) drop the older roslyn4.0 generator/codefixer variant, so the
+    generators run exactly once. Imported by BOTH the real and the wpftmp project.
+  -->
+  <Target Name="FixDuplicateRoslynAnalyzers" BeforeTargets="CoreCompile">
+    <RemoveDuplicates Inputs="@(Analyzer)">
+      <Output TaskParameter="Filtered" ItemName="_UniqueAnalyzer" />
+    </RemoveDuplicates>
+    <ItemGroup>
+      <Analyzer Remove="@(Analyzer)" />
+      <Analyzer Include="@(_UniqueAnalyzer)" />
+      <Analyzer Remove="@(Analyzer)"
+                Condition="$([System.String]::Copy('%(Identity)').Replace('\','/').Contains('/roslyn4.0/'))" />
+    </ItemGroup>
+  </Target>
+
+</Project>

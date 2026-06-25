@@ -10,6 +10,9 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <AssemblyName>JmdExplorer</AssemblyName>
     <RootNamespace>JmdExplorer.App</RootNamespace>
+    <!-- Ensure analyzers/source generators (CommunityToolkit.Mvvm) run during WPF's
+         XAML markup-compilation temp project so generated members aren't duplicated. -->
+    <IncludePackageReferencesDuringMarkupCompilation>true</IncludePackageReferencesDuringMarkupCompilation>
   </PropertyGroup>
 
   <ItemGroup>
