@@ -5,13 +5,20 @@ using JmdExplorer.Core.Models;
 namespace JmdExplorer.Decoders.Profiles;
 
 /// <summary>
-/// Recognizes files carrying the ASCII header text "Xenon Data Format v4s". This
-/// profile ONLY recognizes structure — it explicitly reports that no decoder exists.
+/// Recognizes files carrying the header text "Xenon Data Format v4s". Real-world Xenon
+/// v4s files store this marker as UTF-16LE, but ASCII and UTF-16BE are also accepted.
+/// This profile ONLY recognizes structure — it explicitly reports that no decoder exists.
 /// </summary>
 public sealed class XenonDataFormatV4sProfile : IFormatProfile
 {
     public const string Marker = "Xenon Data Format v4s";
-    private static readonly byte[] MarkerBytes = Encoding.ASCII.GetBytes(Marker);
+
+    private static readonly (byte[] Bytes, string Encoding)[] MarkerVariants =
+    {
+        (Encoding.Unicode.GetBytes(Marker),        "UTF-16LE"),  // observed in real files
+        (Encoding.ASCII.GetBytes(Marker),          "ASCII"),
+        (Encoding.BigEndianUnicode.GetBytes(Marker), "UTF-16BE")
+    };
 
     public string Name => "Xenon Data Format v4s";
 
@@ -24,7 +31,7 @@ public sealed class XenonDataFormatV4sProfile : IFormatProfile
             // The marker is expected within the first 512 bytes.
             int probe = (int)Math.Min(512, stream.Length);
             byte[] buf = reader.ReadBytes(probe);
-            return IndexOf(buf, MarkerBytes) >= 0;
+            return FindMarker(buf).Offset >= 0;
         }
         catch
         {
@@ -38,26 +45,24 @@ public sealed class XenonDataFormatV4sProfile : IFormatProfile
         int probe = (int)Math.Min(512, stream.Length);
         byte[] buf = new byte[probe];
         int read = stream.Read(buf, 0, probe);
-        int markerOffset = IndexOf(buf.AsSpan(0, read), MarkerBytes);
 
-        string? version = TryParseVersion(buf.AsSpan(0, read), markerOffset);
-        string headerText = ExtractHeaderText(buf.AsSpan(0, read), markerOffset);
+        var (offset, encoding, matchedBytes) = FindMarker(buf.AsSpan(0, read));
 
         // Heuristic hints only — the region detector still discovers boundaries itself.
         var hints = new List<RegionHint>
         {
             new() { Name = "Header", StartOffset = 0, ExpectedType = RegionType.Header,
-                    Note = "Xenon v4s format header" }
+                    Note = $"Xenon v4s format header ({encoding})" }
         };
 
         return new FormatAnalysisResult
         {
             FormatName = Name,
             Confidence = Confidence.High,
-            Version = version,
-            HeaderOffset = markerOffset < 0 ? 0 : markerOffset,
-            HeaderText = headerText,
-            MagicBytes = MarkerBytes,
+            Version = "4s",
+            HeaderOffset = offset < 0 ? 0 : offset,
+            HeaderText = $"{Marker}  [{encoding}]",
+            MagicBytes = matchedBytes,
             DecoderAvailable = false,            // <-- the whole point: no real decoder yet
             DecoderStatus = "Not implemented",
             Mode = "Inspection only",
@@ -65,7 +70,7 @@ public sealed class XenonDataFormatV4sProfile : IFormatProfile
             RegionHints = hints,
             Notes = new[]
             {
-                "Format header recognized as 'Xenon Data Format v4s'.",
+                $"Format header recognized as 'Xenon Data Format v4s' (encoded as {encoding}).",
                 "No verified decoder is currently available for this format.",
                 "Inspection, region analysis, and raw block extraction are available; " +
                 "decoding into a usable asset is NOT."
@@ -73,20 +78,15 @@ public sealed class XenonDataFormatV4sProfile : IFormatProfile
         };
     }
 
-    private static string ExtractHeaderText(ReadOnlySpan<byte> buf, int markerOffset)
+    /// <summary>Finds the marker in any supported encoding; returns offset -1 if absent.</summary>
+    private static (int Offset, string Encoding, byte[] Bytes) FindMarker(ReadOnlySpan<byte> haystack)
     {
-        if (markerOffset < 0) return Marker;
-        // Read printable run starting at the marker.
-        int end = markerOffset;
-        while (end < buf.Length && buf[end] >= 0x20 && buf[end] <= 0x7E) end++;
-        return Encoding.ASCII.GetString(buf.Slice(markerOffset, end - markerOffset));
-    }
-
-    private static string? TryParseVersion(ReadOnlySpan<byte> buf, int markerOffset)
-    {
-        // The marker itself ends in "v4s"; surface that as the version.
-        if (markerOffset < 0) return "4s";
-        return "4s";
+        foreach (var (bytes, enc) in MarkerVariants)
+        {
+            int idx = IndexOf(haystack, bytes);
+            if (idx >= 0) return (idx, enc, bytes);
+        }
+        return (-1, "ASCII", MarkerVariants[1].Bytes);
     }
 
     private static int IndexOf(ReadOnlySpan<byte> haystack, ReadOnlySpan<byte> needle)

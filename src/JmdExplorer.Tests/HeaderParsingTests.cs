@@ -39,6 +39,28 @@ public class HeaderParsingTests
     }
 
     [Fact]
+    public void XenonProfile_RecognizesUtf16LeMarker()
+    {
+        // Real-world Xenon v4s files store the header marker as UTF-16LE, not ASCII.
+        using var ms = new MemoryStream();
+        ms.Write(System.Text.Encoding.Unicode.GetBytes(XenonDataFormatV4sProfile.Marker));
+        ms.Write(new byte[256]); // padding
+        var data = ms.ToArray();
+
+        var profile = new XenonDataFormatV4sProfile();
+        using var probe = new MemoryStream(data);
+        using var reader = new BinaryReader(probe);
+        Assert.True(profile.CanHandle(reader));
+
+        using var analyze = new MemoryStream(data);
+        var result = profile.Analyze(analyze);
+        Assert.Equal(Confidence.High, result.Confidence);
+        Assert.Equal(0, result.HeaderOffset);
+        Assert.Contains("UTF-16LE", result.HeaderText);
+        Assert.False(result.DecoderAvailable);
+    }
+
+    [Fact]
     public void XenonProfile_DoesNotRecognizeRandomData()
     {
         var data = SampleFileBuilder.BuildUnknownSample();

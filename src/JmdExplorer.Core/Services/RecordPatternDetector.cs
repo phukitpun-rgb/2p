@@ -78,9 +78,10 @@ public sealed class RecordPatternDetector
         if (recordCount < 2) return 0;
         double totalColScore = 0;
 
+        Span<int> hist = stackalloc int[256];
         for (int col = 0; col < recordSize; col++)
         {
-            Span<int> hist = stackalloc int[256];
+            hist.Clear();
             for (int r = 0; r < recordCount; r++)
             {
                 byte v = data[r * recordSize + col];
