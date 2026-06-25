@@ -1,0 +1,29 @@
+<UserControl x:Class="JmdExplorer.App.Views.ExportReportView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0" Text="Export Report" Style="{StaticResource HeaderText}"/>
+
+        <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,12">
+            <Button Content="Refresh Preview" Command="{Binding RefreshPreviewCommand}" IsEnabled="{Binding HasFile}"/>
+            <Button Content="Export TXT" Style="{StaticResource AccentButton}" Command="{Binding ExportTxtCommand}" IsEnabled="{Binding HasFile}"/>
+            <Button Content="Export JSON" Style="{StaticResource AccentButton}" Command="{Binding ExportJsonCommand}" IsEnabled="{Binding HasFile}"/>
+            <Button Content="Export HTML" Style="{StaticResource AccentButton}" Command="{Binding ExportHtmlCommand}" IsEnabled="{Binding HasFile}"/>
+        </StackPanel>
+
+        <Border Grid.Row="2" Background="{StaticResource BgPanelBrush}" BorderBrush="{StaticResource BorderBrush}"
+                BorderThickness="1" CornerRadius="6">
+            <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="14">
+                <TextBox Text="{Binding Preview, Mode=OneWay}" IsReadOnly="True" BorderThickness="0"
+                         Background="Transparent" Foreground="{StaticResource TextBrush}"
+                         FontFamily="{StaticResource MonoFont}" TextWrapping="NoWrap" AcceptsReturn="True"/>
+            </ScrollViewer>
+        </Border>
+    </Grid>
+</UserControl>
