@@ -17,7 +17,7 @@ public sealed partial class SettingsViewModel : ObservableObject, IPageViewModel
     }
 
     public string Title => "Settings";
-    public string Glyph => ""; // settings
+    public string Glyph => "E713"; // settings
 
     [ObservableProperty] private int _defaultMinStringLength = 4;
     [ObservableProperty] private bool _defaultScanUtf16 = true;
