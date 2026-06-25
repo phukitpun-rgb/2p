@@ -20,7 +20,7 @@ public sealed partial class StringScannerViewModel : ScanViewModelBase
     }
 
     public override string Title => "String Scanner";
-    public override string Glyph => ""; // font
+    public override string Glyph => "E8C1"; // font
 
     public ObservableCollection<ScannedString> Strings => Session.Strings;
 

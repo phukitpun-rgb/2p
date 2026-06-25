@@ -19,7 +19,7 @@ public sealed partial class StructureAnalyzerViewModel : ScanViewModelBase
     }
 
     public override string Title => "Structure Analyzer";
-    public override string Glyph => ""; // chart
+    public override string Glyph => "E9D9"; // chart
 
     public ObservableCollection<Region> Regions => Session.Regions;
     public ObservableCollection<RecordPatternCandidate> RecordPatterns => Session.RecordPatterns;
@@ -33,9 +33,11 @@ public sealed partial class StructureAnalyzerViewModel : ScanViewModelBase
         {
             await Session.DetectRegionsAsync(ct, progress);
 
-            // Run repeating-record detection over the largest non-padding region.
+            // Run repeating-record detection over the largest structured region. High-entropy
+            // (likely compressed/encrypted) and zero-padding regions are skipped because fixed
+            // record layouts are not detectable there.
             var target = Session.Regions
-                .Where(r => r.Type is RegionType.HighEntropyPayload or RegionType.StructuredBinary
+                .Where(r => r.Type is RegionType.StructuredBinary
                               or RegionType.RepeatingRecord or RegionType.Metadata)
                 .OrderByDescending(r => r.Size)
                 .FirstOrDefault();

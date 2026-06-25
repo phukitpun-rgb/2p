@@ -32,7 +32,7 @@ public sealed partial class ExportReportViewModel : ObservableObject, IPageViewM
     }
 
     public string Title => "Export Report";
-    public string Glyph => ""; // download
+    public string Glyph => "E896"; // download
 
     public bool HasFile => _session.Context is not null;
 

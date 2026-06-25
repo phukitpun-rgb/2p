@@ -37,7 +37,7 @@ public sealed partial class DecoderPluginsViewModel : ObservableObject, IPageVie
     }
 
     public string Title => "Decoder Plugins";
-    public string Glyph => ""; // repair / plugin
+    public string Glyph => "E74C"; // plugin
 
     public bool HasFile => _session.Context is not null;
 

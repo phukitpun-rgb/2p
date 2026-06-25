@@ -49,9 +49,12 @@ public sealed class StringScanner
         long asciiRunStart = 0;
         bool asciiHasHighByte = false;
 
-        // UTF-16 LE/BE state machines run over the same byte stream.
-        var u16le = new Utf16RunState(littleEndian: true);
-        var u16be = new Utf16RunState(littleEndian: false);
+        // UTF-16 strings can start at any byte offset, so for each endianness we run
+        // two pairing machines: one aligned to even byte offsets and one to odd.
+        var u16leEven = new Utf16RunState(littleEndian: true);
+        var u16leOdd = new Utf16RunState(littleEndian: true);
+        var u16beEven = new Utf16RunState(littleEndian: false);
+        var u16beOdd = new Utf16RunState(littleEndian: false);
 
         while (results.Count < options.MaxResults)
         {
@@ -80,8 +83,18 @@ public sealed class StringScanner
                     }
                 }
 
-                if (options.ScanUtf16LE) u16le.Push(b, pos, results, options);
-                if (options.ScanUtf16BE) u16be.Push(b, pos, results, options);
+                // Even-aligned machine sees every byte; odd-aligned machine skips byte 0
+                // so its pairing begins at offset 1.
+                if (options.ScanUtf16LE)
+                {
+                    u16leEven.Push(b, pos, results, options);
+                    if (pos > 0) u16leOdd.Push(b, pos, results, options);
+                }
+                if (options.ScanUtf16BE)
+                {
+                    u16beEven.Push(b, pos, results, options);
+                    if (pos > 0) u16beOdd.Push(b, pos, results, options);
+                }
             }
 
             filePos += read;
@@ -89,8 +102,10 @@ public sealed class StringScanner
         }
 
         FlushAscii(results, asciiRun, asciiRunStart, asciiHasHighByte, options);
-        u16le.Flush(results, options);
-        u16be.Flush(results, options);
+        u16leEven.Flush(results, options);
+        u16leOdd.Flush(results, options);
+        u16beEven.Flush(results, options);
+        u16beOdd.Flush(results, options);
 
         progress?.Report(1d);
 
@@ -99,7 +114,12 @@ public sealed class StringScanner
         {
             q = q.Where(s => s.Value.Contains(options.Keyword!, StringComparison.OrdinalIgnoreCase));
         }
-        return q.OrderBy(s => s.Offset).Take(options.MaxResults).ToList();
+        return q
+            .GroupBy(s => (s.Offset, s.Encoding, s.Value))
+            .Select(g => g.First())
+            .OrderBy(s => s.Offset)
+            .Take(options.MaxResults)
+            .ToList();
     }
 
     private static bool IsAsciiPrintable(byte b) => b == 0x09 || (b >= 0x20 && b <= 0x7E);
