@@ -201,9 +201,21 @@ dotnet run --project tools/JmdExtract -c Release -- extract path\to\car.jmd outD
 ```
 
 By default `extract` keeps assets with a header-derived size (e.g. DDS) plus high-confidence
-matches, skipping noisy 2-byte-magic false positives; `--all` carves every signature. A
-`*_manifest.json` is written alongside the output. DDS sizes are computed from the real
-header so the carved `.dds` files are complete and openable.
+matches, skipping noisy 2-byte-magic false positives; `--all` carves every signature; `--png`
+also decodes DXT-compressed DDS textures to universally-viewable `.png`. A `*_manifest.json` is
+written alongside the output. DDS sizes are computed from the real header so the carved `.dds`
+files are complete and openable.
+
+### GUI app (`JmdExtractApp`)
+
+A point-and-click WinForms front-end lives in `tools/JmdExtractApp`. Open a `.jmd` (or drag it
+onto the window), **Scan** to list embedded assets, select a DDS row to see an inline **preview**,
+then **Extract All / Extract Selected** (with an optional "save DDS as PNG"). It builds and
+publishes reliably from the CLI (unlike the WPF app):
+
+```cmd
+dotnet run --project tools/JmdExtractApp -c Release
+```
 
 > **Honesty note:** `Xenon Data Format v4` files (e.g. `wheel.jmd`, `car.jmd`) use a packed
 > payload that is **not yet decoded** — `jmdextract` will report what it sees but cannot

@@ -32,7 +32,8 @@ internal static class Cli
                 "extract" when args.Length >= 2 => Extract(
                     args[1],
                     args.Skip(2).FirstOrDefault(a => !a.StartsWith("--")),
-                    extractAll: args.Contains("--all")),
+                    extractAll: args.Contains("--all"),
+                    toPng: args.Contains("--png")),
                 _ => Fail()
             };
         }
@@ -66,6 +67,8 @@ internal static class Cli
                                                        (outdir defaults to <file>_extracted)
                   --all                                Also carve low-confidence matches
                                                        (2-byte magics; noisy on big files)
+                  --png                                Also decode DXT DDS textures to .png
+                                                       (universally viewable)
 
             Notes:
               * By default, extract pulls assets with a header-derived size (e.g. DDS)
@@ -136,7 +139,7 @@ internal static class Cli
         return 0;
     }
 
-    private static int Extract(string path, string? outDir, bool extractAll)
+    private static int Extract(string path, string? outDir, bool extractAll, bool toPng)
     {
         if (!File.Exists(path)) throw new FileNotFoundException(null, path);
 
@@ -206,8 +209,34 @@ internal static class Cli
         Console.WriteLine($"  {Path.GetFullPath(outDir)}");
         Console.WriteLine($"  {complete} complete asset(s) with header-derived sizes; " +
                           $"{outcome.BinFiles.Count - complete} raw carve(s) as .bin.");
+
+        if (toPng)
+        {
+            int png = ConvertDdsToPng(outcome.BinFiles);
+            Console.WriteLine($"  Converted {png} DDS texture(s) to .png.");
+        }
+
         Console.WriteLine($"Manifest: {Path.GetFileName(outcome.ManifestPath)}");
         return 0;
+    }
+
+    /// <summary>Decodes every carved .dds to a sibling .png. Skips unsupported formats.</summary>
+    private static int ConvertDdsToPng(IEnumerable<string> files)
+    {
+        int count = 0;
+        foreach (var f in files.Where(f => f.EndsWith(".dds", StringComparison.OrdinalIgnoreCase)))
+        {
+            try
+            {
+                byte[] dds = File.ReadAllBytes(f);
+                if (!DdsImage.IsSupported(dds)) continue;
+                var img = DdsImage.Decode(dds);
+                PngWriter.WriteRgba(Path.ChangeExtension(f, ".png"), img.Width, img.Height, img.Rgba);
+                count++;
+            }
+            catch { /* leave the .dds in place if decode fails */ }
+        }
+        return count;
     }
 
     // Real extension only ever used when the exact, complete size was parsed from a header.

@@ -18,7 +18,10 @@ public sealed class MainForm : Form
     private readonly Button _scanBtn;
     private readonly Label _infoLabel;
     private readonly DataGridView _grid;
+    private readonly PictureBox _previewBox;
+    private readonly Label _previewLabel;
     private readonly CheckBox _lowConfChk;
+    private readonly CheckBox _pngChk;
     private readonly Button _extractAllBtn;
     private readonly Button _extractSelBtn;
     private readonly ProgressBar _progress;
@@ -69,11 +72,11 @@ public sealed class MainForm : Form
             Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
         };
 
-        // --- Grid ---
+        // --- Grid (left) ---
         _grid = new DataGridView
         {
-            Left = 12, Top = 110, Width = 878, Height = 410,
-            Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right,
+            Left = 12, Top = 110, Width = 560, Height = 410,
+            Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left,
             BackgroundColor = BgPanel, BorderStyle = BorderStyle.None,
             AllowUserToAddRows = false, AllowUserToDeleteRows = false, ReadOnly = true,
             SelectionMode = DataGridViewSelectionMode.FullRowSelect, MultiSelect = true,
@@ -92,14 +95,35 @@ public sealed class MainForm : Form
         _grid.Columns.Add("size", "Size");
         _grid.Columns.Add("conf", "Confidence");
         _grid.Columns[0].FillWeight = 30;
+        _grid.SelectionChanged += (_, _) => UpdatePreview();
+
+        // --- Preview (right) ---
+        _previewLabel = new Label
+        {
+            Left = 584, Top = 110, Width = 306, Height = 20, ForeColor = Color.Gray,
+            Text = "Preview", Anchor = AnchorStyles.Top | AnchorStyles.Right
+        };
+        _previewBox = new PictureBox
+        {
+            Left = 584, Top = 132, Width = 306, Height = 388,
+            Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Right,
+            BackColor = Color.FromArgb(20, 21, 24), BorderStyle = BorderStyle.FixedSingle,
+            SizeMode = PictureBoxSizeMode.Zoom
+        };
 
         // --- Bottom controls ---
         _lowConfChk = new CheckBox
         {
-            Text = "Include low-confidence matches (--all)", Left = 12, Top = 532, Width = 320,
+            Text = "Include low-confidence matches", Left = 12, Top = 532, Width = 250,
             ForeColor = Fg, Anchor = AnchorStyles.Bottom | AnchorStyles.Left
         };
         _lowConfChk.CheckedChanged += (_, _) => RefreshGrid();
+
+        _pngChk = new CheckBox
+        {
+            Text = "Also save DDS as PNG", Left = 270, Top = 532, Width = 200, Checked = true,
+            ForeColor = Fg, Anchor = AnchorStyles.Bottom | AnchorStyles.Left
+        };
 
         _extractSelBtn = MakeButton("Extract Selected", 560, 528, 150);
         _extractSelBtn.Anchor = AnchorStyles.Bottom | AnchorStyles.Right;
@@ -125,8 +149,8 @@ public sealed class MainForm : Form
 
         Controls.AddRange(new Control[]
         {
-            _openBtn, _pathBox, _scanBtn, _infoLabel, _grid,
-            _lowConfChk, _extractSelBtn, _extractAllBtn, _progress, _statusLabel
+            _openBtn, _pathBox, _scanBtn, _infoLabel, _grid, _previewLabel, _previewBox,
+            _lowConfChk, _pngChk, _extractSelBtn, _extractAllBtn, _progress, _statusLabel
         });
     }
 
@@ -248,6 +272,66 @@ public sealed class MainForm : Form
             ? src
             : src.Where(m => m.SizeEstimate is > 0 || m.Confidence == Confidence.High);
 
+    // --- Preview --------------------------------------------------------
+
+    /// <summary>Decodes the selected DDS texture and shows it in the preview pane.</summary>
+    private void UpdatePreview()
+    {
+        _previewBox.Image?.Dispose();
+        _previewBox.Image = null;
+
+        if (_filePath is null || _grid.SelectedRows.Count == 0) { _previewLabel.Text = "Preview"; return; }
+        var view = Filtered(_matches).ToList();
+        int idx = (int)_grid.SelectedRows[0].Cells[0].Value;
+        if (idx < 0 || idx >= view.Count) return;
+        var m = view[idx];
+
+        if (m.Type != "DDS" || m.SizeEstimate is not > 0)
+        {
+            _previewLabel.Text = $"Preview — {m.Type} (no image preview)";
+            return;
+        }
+        try
+        {
+            byte[] dds = new byte[m.SizeEstimate.Value];
+            using (var fs = File.OpenRead(_filePath))
+            {
+                fs.Seek(m.Offset, SeekOrigin.Begin);
+                fs.ReadExactly(dds);
+            }
+            if (!DdsImage.IsSupported(dds)) { _previewLabel.Text = "Preview — unsupported DDS format"; return; }
+            var img = DdsImage.Decode(dds);
+            _previewBox.Image = ToBitmap(img);
+            _previewLabel.Text = $"Preview — {img.Width}×{img.Height} DDS";
+        }
+        catch (Exception ex)
+        {
+            _previewLabel.Text = $"Preview — decode failed: {ex.Message}";
+        }
+    }
+
+    private static Bitmap ToBitmap(DdsImage.Decoded img)
+    {
+        var bmp = new Bitmap(img.Width, img.Height, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+        var rect = new Rectangle(0, 0, img.Width, img.Height);
+        var bits = bmp.LockBits(rect, System.Drawing.Imaging.ImageLockMode.WriteOnly, bmp.PixelFormat);
+        try
+        {
+            // Source is RGBA; GDI+ Format32bppArgb is BGRA in memory, so swap R/B.
+            byte[] bgra = new byte[img.Rgba.Length];
+            for (int i = 0; i < img.Rgba.Length; i += 4)
+            {
+                bgra[i] = img.Rgba[i + 2];     // B
+                bgra[i + 1] = img.Rgba[i + 1]; // G
+                bgra[i + 2] = img.Rgba[i];     // R
+                bgra[i + 3] = img.Rgba[i + 3]; // A
+            }
+            System.Runtime.InteropServices.Marshal.Copy(bgra, 0, bits.Scan0, bgra.Length);
+        }
+        finally { bmp.UnlockBits(bits); }
+        return bmp;
+    }
+
     // --- Extract --------------------------------------------------------
 
     private async Task ExtractAsync(bool selectedOnly)
@@ -279,10 +363,11 @@ public sealed class MainForm : Form
         string outDir = dlg.SelectedPath;
         string path = _filePath;
 
+        bool toPng = _pngChk.Checked;
         SetBusy(true, $"Extracting {targets.Count} file(s)…");
         try
         {
-            var outcome = await Task.Run(() =>
+            var (outcome, pngCount) = await Task.Run(() =>
             {
                 long len = new FileInfo(path).Length;
                 string sha;
@@ -302,16 +387,21 @@ public sealed class MainForm : Form
                     };
                 }).ToList();
 
-                return new RawBlockExtractor().Extract(path, outDir, requests,
+                var oc = new RawBlockExtractor().Extract(path, outDir, requests,
                     ReadHeaderText(path) is { Length: > 0 } h ? h : "Unknown binary", sha);
+                int png = toPng ? ConvertDdsToPng(oc.BinFiles) : 0;
+                return (oc, png);
             });
 
             int complete = targets.Count(m => m.SizeEstimate is > 0);
-            _statusLabel.Text = $"Extracted {outcome.BinFiles.Count} file(s) ({complete} complete asset(s)).";
+            _statusLabel.Text = $"Extracted {outcome.BinFiles.Count} file(s) ({complete} complete asset(s))" +
+                                (toPng ? $", {pngCount} PNG." : ".");
             if (MessageBox.Show(this,
                     $"Extracted {outcome.BinFiles.Count} file(s) to:\n{outDir}\n\n" +
                     $"{complete} complete asset(s) with header-derived sizes; " +
-                    $"{outcome.BinFiles.Count - complete} raw carve(s) as .bin.\n\nOpen the folder now?",
+                    $"{outcome.BinFiles.Count - complete} raw carve(s) as .bin.\n" +
+                    (toPng ? $"{pngCount} DDS texture(s) also saved as .png.\n" : "") +
+                    "\nOpen the folder now?",
                     "Extraction complete", MessageBoxButtons.YesNo, MessageBoxIcon.Information) == DialogResult.Yes)
             {
                 System.Diagnostics.Process.Start("explorer.exe", $"\"{outDir}\"");
@@ -345,6 +435,25 @@ public sealed class MainForm : Form
         string text = Encoding.Unicode.GetString(head[..(n - (n % 2))]);
         int z = text.IndexOf('\0');
         return (z >= 0 ? text[..z] : text).Trim();
+    }
+
+    /// <summary>Decodes every carved .dds to a sibling .png; skips unsupported formats.</summary>
+    private static int ConvertDdsToPng(IEnumerable<string> files)
+    {
+        int count = 0;
+        foreach (var f in files.Where(f => f.EndsWith(".dds", StringComparison.OrdinalIgnoreCase)))
+        {
+            try
+            {
+                byte[] dds = File.ReadAllBytes(f);
+                if (!DdsImage.IsSupported(dds)) continue;
+                var img = DdsImage.Decode(dds);
+                PngWriter.WriteRgba(Path.ChangeExtension(f, ".png"), img.Width, img.Height, img.Rgba);
+                count++;
+            }
+            catch { /* leave the .dds if decode fails */ }
+        }
+        return count;
     }
 
     // Real extension only when the exact, complete size was parsed from a header.
