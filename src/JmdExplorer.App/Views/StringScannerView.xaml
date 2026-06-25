@@ -1,0 +1,58 @@
+<UserControl x:Class="JmdExplorer.App.Views.StringScannerView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0" Text="String Scanner" Style="{StaticResource HeaderText}"/>
+
+        <Border Grid.Row="1" Background="{StaticResource BgPanelBrush}" BorderBrush="{StaticResource BorderBrush}"
+                BorderThickness="1" CornerRadius="6" Padding="14" Margin="0,0,0,12">
+            <WrapPanel>
+                <StackPanel Orientation="Horizontal" Margin="0,0,16,6">
+                    <TextBlock Text="Min length:" VerticalAlignment="Center" Margin="0,0,6,0" Style="{StaticResource SubtleText}"/>
+                    <TextBox Width="50" Text="{Binding MinLength, UpdateSourceTrigger=PropertyChanged}"/>
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" Margin="0,0,16,6">
+                    <TextBlock Text="Keyword:" VerticalAlignment="Center" Margin="0,0,6,0" Style="{StaticResource SubtleText}"/>
+                    <TextBox Width="140" Text="{Binding Keyword, UpdateSourceTrigger=PropertyChanged}"/>
+                </StackPanel>
+                <CheckBox Content="ASCII / UTF-8" IsChecked="{Binding ScanAscii}" VerticalAlignment="Center"/>
+                <CheckBox Content="UTF-16 LE" IsChecked="{Binding ScanUtf16LE}" VerticalAlignment="Center"/>
+                <CheckBox Content="UTF-16 BE" IsChecked="{Binding ScanUtf16BE}" VerticalAlignment="Center"/>
+                <CheckBox Content="Printable only" IsChecked="{Binding PrintableOnly}" VerticalAlignment="Center"/>
+                <Button Content="Scan Strings" Style="{StaticResource AccentButton}" Command="{Binding ScanCommand}"
+                        IsEnabled="{Binding HasFile}" Margin="12,0,0,0"/>
+                <Button Content="Cancel" Command="{Binding CancelCommand}"
+                        Visibility="{Binding IsBusy, Converter={StaticResource BoolToVis}}"/>
+                <ProgressBar Width="160" Height="8" VerticalAlignment="Center" Margin="8,0,0,0"
+                             Minimum="0" Maximum="100" Value="{Binding Progress}"
+                             Visibility="{Binding IsBusy, Converter={StaticResource BoolToVis}}"
+                             Foreground="{StaticResource AccentBrush}" Background="{StaticResource BgRaisedBrush}"/>
+            </WrapPanel>
+        </Border>
+
+        <DataGrid Grid.Row="2" ItemsSource="{Binding Strings}">
+            <DataGrid.Columns>
+                <DataGridTextColumn Header="Offset" Binding="{Binding OffsetHex}" Width="Auto"/>
+                <DataGridTextColumn Header="Encoding" Binding="{Binding EncodingDisplay}" Width="Auto"/>
+                <DataGridTextColumn Header="Length" Binding="{Binding Length}" Width="Auto"/>
+                <DataGridTextColumn Header="Value" Binding="{Binding Value}" Width="*"
+                                    FontFamily="{StaticResource MonoFont}"/>
+                <DataGridTemplateColumn Header="">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <Button Content="Hex" Padding="8,2" Margin="2"
+                                    Command="{Binding DataContext.OpenInHexCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}"
+                                    CommandParameter="{Binding}"/>
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+            </DataGrid.Columns>
+        </DataGrid>
+    </Grid>
+</UserControl>

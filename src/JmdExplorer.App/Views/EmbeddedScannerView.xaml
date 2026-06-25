@@ -1,0 +1,70 @@
+<UserControl x:Class="JmdExplorer.App.Views.EmbeddedScannerView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0" Text="Embedded File Scanner" Style="{StaticResource HeaderText}"/>
+
+        <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,12">
+            <Button Content="Scan for Signatures" Style="{StaticResource AccentButton}"
+                    Command="{Binding ScanCommand}" IsEnabled="{Binding HasFile}"/>
+            <Button Content="Cancel" Command="{Binding CancelCommand}"
+                    Visibility="{Binding IsBusy, Converter={StaticResource BoolToVis}}"/>
+            <ProgressBar Width="200" Height="8" VerticalAlignment="Center" Margin="8,0,0,0"
+                         Minimum="0" Maximum="100" Value="{Binding Progress}"
+                         Visibility="{Binding IsBusy, Converter={StaticResource BoolToVis}}"
+                         Foreground="{StaticResource AccentBrush}" Background="{StaticResource BgPanelBrush}"/>
+            <TextBlock Text="{Binding StatusMessage}" VerticalAlignment="Center" Margin="12,0,0,0" Style="{StaticResource SubtleText}"/>
+        </StackPanel>
+
+        <Grid Grid.Row="2">
+            <DataGrid ItemsSource="{Binding Signatures}">
+                <DataGrid.Columns>
+                    <DataGridTextColumn Header="Type" Binding="{Binding Type}" Width="*"/>
+                    <DataGridTextColumn Header="Offset" Binding="{Binding OffsetHex}" Width="Auto"/>
+                    <DataGridTextColumn Header="Confidence" Binding="{Binding Confidence}" Width="Auto"/>
+                    <DataGridTextColumn Header="Size Estimate"
+                                        Binding="{Binding SizeEstimate, Converter={StaticResource NullableSize}}" Width="Auto"/>
+                    <DataGridTextColumn Header="Action" Binding="{Binding Action}" Width="Auto"/>
+                    <DataGridTemplateColumn Header="">
+                        <DataGridTemplateColumn.CellTemplate>
+                            <DataTemplate>
+                                <StackPanel Orientation="Horizontal">
+                                    <Button Content="Hex" Padding="8,2" Margin="2"
+                                            Command="{Binding DataContext.OpenInHexCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}"
+                                            CommandParameter="{Binding}"/>
+                                    <Button Content="Extract Raw" Padding="8,2" Margin="2"
+                                            Command="{Binding DataContext.ExtractRawCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}"
+                                            CommandParameter="{Binding}"/>
+                                </StackPanel>
+                            </DataTemplate>
+                        </DataGridTemplateColumn.CellTemplate>
+                    </DataGridTemplateColumn>
+                </DataGrid.Columns>
+            </DataGrid>
+
+            <!-- Honest empty message -->
+            <Border VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="520"
+                    Background="{StaticResource BgPanelBrush}" BorderBrush="{StaticResource WarnBrush}"
+                    BorderThickness="1" CornerRadius="8" Padding="20">
+                <Border.Style>
+                    <Style TargetType="Border">
+                        <Setter Property="Visibility" Value="Visible"/>
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding EmptyMessage}" Value="">
+                                <Setter Property="Visibility" Value="Collapsed"/>
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Border.Style>
+                <TextBlock Text="{Binding EmptyMessage}" Foreground="{StaticResource WarnBrush}"
+                           TextWrapping="Wrap" TextAlignment="Center" FontSize="13"/>
+            </Border>
+        </Grid>
+    </Grid>
+</UserControl>

@@ -1,0 +1,49 @@
+<Application x:Class="JmdExplorer.App.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:JmdExplorer.App.ViewModels"
+             xmlns:views="clr-namespace:JmdExplorer.App.Views"
+             xmlns:conv="clr-namespace:JmdExplorer.App.Converters">
+    <Application.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="Themes/Dark.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+
+            <!-- Converters -->
+            <conv:BoolToVisibilityConverter x:Key="BoolToVis" />
+            <conv:InverseBoolToVisibilityConverter x:Key="InverseBoolToVis" />
+            <conv:ResourceKeyToBrushConverter x:Key="KeyToBrush" />
+            <conv:NullableSizeConverter x:Key="NullableSize" />
+
+            <!-- Page VM -> View mapping -->
+            <DataTemplate DataType="{x:Type vm:FileInspectorViewModel}">
+                <views:FileInspectorView />
+            </DataTemplate>
+            <DataTemplate DataType="{x:Type vm:HexViewerViewModel}">
+                <views:HexViewerView />
+            </DataTemplate>
+            <DataTemplate DataType="{x:Type vm:StructureAnalyzerViewModel}">
+                <views:StructureAnalyzerView />
+            </DataTemplate>
+            <DataTemplate DataType="{x:Type vm:EmbeddedScannerViewModel}">
+                <views:EmbeddedScannerView />
+            </DataTemplate>
+            <DataTemplate DataType="{x:Type vm:StringScannerViewModel}">
+                <views:StringScannerView />
+            </DataTemplate>
+            <DataTemplate DataType="{x:Type vm:ExtractedFilesViewModel}">
+                <views:ExtractedFilesView />
+            </DataTemplate>
+            <DataTemplate DataType="{x:Type vm:DecoderPluginsViewModel}">
+                <views:DecoderPluginsView />
+            </DataTemplate>
+            <DataTemplate DataType="{x:Type vm:ExportReportViewModel}">
+                <views:ExportReportView />
+            </DataTemplate>
+            <DataTemplate DataType="{x:Type vm:SettingsViewModel}">
+                <views:SettingsView />
+            </DataTemplate>
+        </ResourceDictionary>
+    </Application.Resources>
+</Application>

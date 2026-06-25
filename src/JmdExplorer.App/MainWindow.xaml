@@ -1,0 +1,116 @@
+<Window x:Class="JmdExplorer.App.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="clr-namespace:JmdExplorer.App.ViewModels"
+        Title="JMD Explorer" Height="780" Width="1240"
+        MinHeight="560" MinWidth="940"
+        Background="{StaticResource BgBrush}"
+        AllowDrop="True"
+        Drop="Window_Drop" DragOver="Window_DragOver"
+        d:DataContext="{d:DesignInstance vm:MainViewModel}"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        mc:Ignorable="d"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006">
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <!-- ===== Top bar ===== -->
+        <Border Grid.Row="0" Background="{StaticResource BgRaisedBrush}" BorderBrush="{StaticResource BorderBrush}"
+                BorderThickness="0,0,0,1" Padding="16,10">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock Text="&#xE7C3;" FontFamily="Segoe MDL2 Assets" FontSize="20"
+                               Foreground="{StaticResource AccentBrush}" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                    <TextBlock Text="JMD Explorer" FontSize="18" FontWeight="SemiBold"
+                               Foreground="{StaticResource TextBrush}" VerticalAlignment="Center"/>
+                    <Border Background="{StaticResource BgPanelBrush}" CornerRadius="3" Padding="6,2" Margin="12,0,0,0"
+                            BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" VerticalAlignment="Center">
+                        <TextBlock Text="honest binary inspector" Style="{StaticResource SubtleText}"/>
+                    </Border>
+                </StackPanel>
+
+                <TextBlock Grid.Column="1" Text="{Binding CurrentFileName}" VerticalAlignment="Center"
+                           HorizontalAlignment="Center" Style="{StaticResource MonoText}" FontSize="13"/>
+
+                <StackPanel Grid.Column="2" Orientation="Horizontal">
+                    <ProgressBar Width="120" Height="6" IsIndeterminate="True" VerticalAlignment="Center" Margin="0,0,10,0"
+                                 Visibility="{Binding IsBusy, Converter={StaticResource BoolToVis}}"
+                                 Foreground="{StaticResource AccentBrush}" Background="{StaticResource BgPanelBrush}"/>
+                    <Button Content="Open File" Style="{StaticResource AccentButton}" Command="{Binding OpenFileCommand}"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- ===== Main area: sidebar + content ===== -->
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="230" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <!-- Sidebar -->
+            <Border Grid.Column="0" Background="{StaticResource BgPanelBrush}" BorderBrush="{StaticResource BorderBrush}"
+                    BorderThickness="0,0,1,0">
+                <ListBox ItemsSource="{Binding Pages}" SelectedItem="{Binding SelectedPage, Mode=TwoWay}"
+                         Margin="8" Background="Transparent" BorderThickness="0"
+                         ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                    <ListBox.ItemContainerStyle>
+                        <Style TargetType="ListBoxItem">
+                            <Setter Property="Padding" Value="0" />
+                            <Setter Property="Margin" Value="0,2" />
+                            <Setter Property="Template">
+                                <Setter.Value>
+                                    <ControlTemplate TargetType="ListBoxItem">
+                                        <Border x:Name="bd" Background="Transparent" CornerRadius="6" Padding="12,9">
+                                            <ContentPresenter />
+                                        </Border>
+                                        <ControlTemplate.Triggers>
+                                            <Trigger Property="IsMouseOver" Value="True">
+                                                <Setter TargetName="bd" Property="Background" Value="{StaticResource BgRaisedBrush}" />
+                                            </Trigger>
+                                            <Trigger Property="IsSelected" Value="True">
+                                                <Setter TargetName="bd" Property="Background" Value="{StaticResource AccentDimBrush}" />
+                                            </Trigger>
+                                        </ControlTemplate.Triggers>
+                                    </ControlTemplate>
+                                </Setter.Value>
+                            </Setter>
+                        </Style>
+                    </ListBox.ItemContainerStyle>
+                    <ListBox.ItemTemplate>
+                        <DataTemplate>
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="{Binding Glyph}" FontFamily="Segoe MDL2 Assets" FontSize="16"
+                                           Foreground="{StaticResource AccentBrush}" Width="26" VerticalAlignment="Center"/>
+                                <TextBlock Text="{Binding Title}" FontSize="13.5" VerticalAlignment="Center"
+                                           Foreground="{StaticResource TextBrush}"/>
+                            </StackPanel>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </Border>
+
+            <!-- Content host -->
+            <Border Grid.Column="1" Background="{StaticResource BgBrush}">
+                <ContentControl Content="{Binding SelectedPage}" Margin="0"/>
+            </Border>
+        </Grid>
+
+        <!-- ===== Status bar ===== -->
+        <Border Grid.Row="2" Background="{StaticResource BgRaisedBrush}" BorderBrush="{StaticResource BorderBrush}"
+                BorderThickness="0,1,0,0" Padding="16,6">
+            <TextBlock Text="{Binding StatusMessage}" Style="{StaticResource SubtleText}"/>
+        </Border>
+    </Grid>
+</Window>
