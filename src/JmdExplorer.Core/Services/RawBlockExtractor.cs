@@ -28,11 +28,7 @@ public sealed class ExtractionOutcome
 /// </summary>
 public sealed class RawBlockExtractor
 {
-    private static readonly JsonSerializerOptions JsonOpts = new()
-    {
-        WriteIndented = true,
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-    };
+    private static readonly JsonSerializerOptions JsonOpts = new() { WriteIndented = true };
 
     /// <summary>
     /// Extracts the requested ranges from <paramref name="sourcePath"/> into

@@ -61,10 +61,9 @@ public static class SampleFileBuilder
         for (int r = 0; r < recordCount; r++)
         {
             byte[] rec = new byte[recordSize];
-            // Mostly-constant leading columns (record type/flags/ids) with a small,
-            // low-cardinality varying tail — typical of serialized fixed-size records.
-            for (int c = 0; c < 32; c++) rec[c] = (byte)c;
-            for (int c = 32; c < recordSize; c++) rec[c] = (byte)rng.Next(0, 2);
+            // constant-ish columns 0..15 (record type/flags), variable tail.
+            for (int c = 0; c < 16; c++) rec[c] = (byte)(c);
+            for (int c = 16; c < recordSize; c++) rec[c] = (byte)rng.Next(0, 4);
             ms.Write(rec, 0, rec.Length);
         }
 

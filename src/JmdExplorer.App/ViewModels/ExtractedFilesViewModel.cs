@@ -31,7 +31,7 @@ public sealed partial class ExtractedFilesViewModel : ObservableObject, IPageVie
     }
 
     public string Title => "Extracted Files";
-    public string Glyph => "E8B7"; // folder
+    public string Glyph => ""; // folder
 
     public bool HasFile => _session.Context is not null;
 

@@ -15,7 +15,6 @@
             <conv:InverseBoolToVisibilityConverter x:Key="InverseBoolToVis" />
             <conv:ResourceKeyToBrushConverter x:Key="KeyToBrush" />
             <conv:NullableSizeConverter x:Key="NullableSize" />
-            <conv:GlyphConverter x:Key="GlyphConv" />
 
             <!-- Page VM -> View mapping -->
             <DataTemplate DataType="{x:Type vm:FileInspectorViewModel}">

@@ -91,7 +91,7 @@
                     <ListBox.ItemTemplate>
                         <DataTemplate>
                             <StackPanel Orientation="Horizontal">
-                                <TextBlock Text="{Binding Glyph, Converter={StaticResource GlyphConv}}" FontFamily="Segoe MDL2 Assets" FontSize="16"
+                                <TextBlock Text="{Binding Glyph}" FontFamily="Segoe MDL2 Assets" FontSize="16"
                                            Foreground="{StaticResource AccentBrush}" Width="26" VerticalAlignment="Center"/>
                                 <TextBlock Text="{Binding Title}" FontSize="13.5" VerticalAlignment="Center"
                                            Foreground="{StaticResource TextBrush}"/>

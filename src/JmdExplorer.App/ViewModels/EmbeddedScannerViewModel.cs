@@ -26,7 +26,7 @@ public sealed partial class EmbeddedScannerViewModel : ScanViewModelBase
     }
 
     public override string Title => "Embedded File Scanner";
-    public override string Glyph => "E721"; // search
+    public override string Glyph => ""; // search
 
     public ObservableCollection<EmbeddedSignatureMatch> Signatures => Session.Signatures;
 

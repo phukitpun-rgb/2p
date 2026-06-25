@@ -48,7 +48,7 @@ public sealed partial class MainViewModel : ObservableObject, IRecipient<Navigat
         _selectedPage = fileInspector;
         _hexViewer = hexViewer;
 
-        messenger.RegisterAll(this);
+        messenger.Register(this);
     }
 
     public ObservableCollection<IPageViewModel> Pages { get; }

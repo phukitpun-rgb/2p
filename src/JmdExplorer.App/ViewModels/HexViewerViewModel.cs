@@ -32,7 +32,7 @@ public sealed partial class HexViewerViewModel : ObservableObject, IPageViewMode
     }
 
     public string Title => "Hex Viewer";
-    public string Glyph => ""; // code
+    public string Glyph => ""; // code
 
     public ObservableCollection<HexLine> Lines { get; } = new();
 
