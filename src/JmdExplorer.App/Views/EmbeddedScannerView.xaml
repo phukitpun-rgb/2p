@@ -13,6 +13,9 @@
         <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,12">
             <Button Content="Scan for Signatures" Style="{StaticResource AccentButton}"
                     Command="{Binding ScanCommand}" IsEnabled="{Binding HasFile}"/>
+            <Button Content="Extract All" Margin="8,0,0,0"
+                    Command="{Binding ExtractAllCommand}"
+                    IsEnabled="{Binding Scanned}"/>
             <Button Content="Cancel" Command="{Binding CancelCommand}"
                     Visibility="{Binding IsBusy, Converter={StaticResource BoolToVis}}"/>
             <ProgressBar Width="200" Height="8" VerticalAlignment="Center" Margin="8,0,0,0"
