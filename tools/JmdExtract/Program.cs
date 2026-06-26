@@ -34,6 +34,11 @@ internal static class Cli
                     args.Skip(2).FirstOrDefault(a => !a.StartsWith("--")),
                     extractAll: args.Contains("--all"),
                     toPng: args.Contains("--png")),
+                "batch" when args.Length >= 2 => Batch(
+                    args[1],
+                    args.Skip(2).FirstOrDefault(a => !a.StartsWith("--")),
+                    extractAll: args.Contains("--all"),
+                    toPng: !args.Contains("--no-png")),
                 _ => Fail()
             };
         }
@@ -69,6 +74,11 @@ internal static class Cli
                                                        (2-byte magics; noisy on big files)
                   --png                                Also decode DXT DDS textures to .png
                                                        (universally viewable)
+              jmdextract batch   <folder> [outdir]     Extract every *.jmd under a folder
+                                                       (recursive; one subfolder per file).
+                                                       DDS->PNG on by default here.
+                  --all                                Also carve low-confidence matches
+                  --no-png                             Skip DDS->PNG decoding
 
             Notes:
               * By default, extract pulls assets with a header-derived size (e.g. DDS)
@@ -147,76 +157,107 @@ internal static class Cli
             Path.GetDirectoryName(Path.GetFullPath(path)) ?? ".",
             Path.GetFileNameWithoutExtension(path) + "_extracted");
 
+        Console.Write("Scanning... ");
+        var r = ExtractCore(path, outDir, extractAll, toPng);
+        Console.WriteLine($"{r.SignaturesFound} signature(s) found.");
+        if (r.Skipped > 0)
+            Console.WriteLine($"Keeping {r.Extracted} useful match(es) (use --all for {r.Skipped} more).");
+        if (r.Extracted == 0)
+        {
+            Console.WriteLine("Nothing to extract.");
+            return 0;
+        }
+        Console.WriteLine();
+        Console.WriteLine($"Extracted {r.Extracted} file(s) to:");
+        Console.WriteLine($"  {Path.GetFullPath(outDir)}");
+        Console.WriteLine($"  {r.CompleteAssets} complete asset(s) with header-derived sizes; " +
+                          $"{r.Extracted - r.CompleteAssets} raw carve(s) as .bin.");
+        if (toPng) Console.WriteLine($"  Converted {r.PngCount} DDS texture(s) to .png.");
+        Console.WriteLine("Manifest: manifest.json");
+        return 0;
+    }
+
+    private sealed record ExtractStats(int SignaturesFound, int Extracted, int CompleteAssets, int PngCount, int Skipped);
+
+    /// <summary>Scans, extracts useful assets, and optionally decodes DDS->PNG. No console
+    /// output, so it can be reused for both single-file and batch modes.</summary>
+    private static ExtractStats ExtractCore(string path, string outDir, bool extractAll, bool toPng)
+    {
         var scanner = new SignatureScanner();
         IReadOnlyList<JmdExplorer.Core.Models.EmbeddedSignatureMatch> matches;
         long fileLen;
         using (var fs = File.OpenRead(path))
         {
             fileLen = fs.Length;
-            Console.Write("Scanning... ");
             matches = scanner.Scan(fs, fs.Length);
         }
-        Console.WriteLine($"{matches.Count} signature(s) found.");
-
+        int found = matches.Count;
+        int skipped = 0;
         if (!extractAll)
         {
-            // Default: keep only assets worth extracting — those with a real, parsed
-            // size, plus High-confidence matches. This drops the 2-byte-magic noise.
             var kept = matches.Where(m =>
                 m.SizeEstimate is > 0 ||
                 m.Confidence == JmdExplorer.Core.Models.Confidence.High).ToList();
-            if (kept.Count != matches.Count)
-                Console.WriteLine($"Keeping {kept.Count} useful match(es) " +
-                                  $"(use --all to carve the remaining {matches.Count - kept.Count}).");
+            skipped = found - kept.Count;
             matches = kept;
         }
-
-        if (matches.Count == 0)
-        {
-            Console.WriteLine("Nothing to extract.");
-            return 0;
-        }
+        if (matches.Count == 0) return new ExtractStats(found, 0, 0, 0, skipped);
 
         string sha;
         using (var fs = File.OpenRead(path))
             sha = Convert.ToHexString(SHA256.HashData(fs)).ToLowerInvariant();
 
-        var requests = new List<ExtractionRequest>(matches.Count);
-        foreach (var m in matches)
+        var requests = matches.Select(m =>
         {
             bool sizeKnown = m.SizeEstimate is > 0;
-            long size = sizeKnown
-                ? m.SizeEstimate!.Value
-                : Math.Min(64 * 1024, fileLen - m.Offset);
-
-            requests.Add(new ExtractionRequest
+            long size = sizeKnown ? m.SizeEstimate!.Value : Math.Min(64 * 1024, fileLen - m.Offset);
+            return new ExtractionRequest
             {
                 Name = $"{m.Type}_0x{m.Offset:X}",
                 StartOffset = m.Offset,
                 EndOffset = m.Offset + size,
                 Type = $"embedded_signature:{m.Type}",
                 Extension = sizeKnown ? ExtensionFor(m.Type) : "bin"
-            });
-        }
+            };
+        }).ToList();
 
-        var extractor = new RawBlockExtractor();
-        var outcome = extractor.Extract(path, outDir, requests,
+        var outcome = new RawBlockExtractor().Extract(path, outDir, requests,
             ReadHeaderText(path) is { Length: > 0 } h ? h : "Unknown binary", sha);
-
         int complete = matches.Count(m => m.SizeEstimate is > 0);
-        Console.WriteLine();
-        Console.WriteLine($"Extracted {outcome.BinFiles.Count} file(s) to:");
-        Console.WriteLine($"  {Path.GetFullPath(outDir)}");
-        Console.WriteLine($"  {complete} complete asset(s) with header-derived sizes; " +
-                          $"{outcome.BinFiles.Count - complete} raw carve(s) as .bin.");
+        int png = toPng ? ConvertDdsToPng(outcome.BinFiles) : 0;
+        return new ExtractStats(found, outcome.BinFiles.Count, complete, png, skipped);
+    }
 
-        if (toPng)
+    /// <summary>Recursively extracts every *.jmd under a folder into one subfolder each.</summary>
+    private static int Batch(string folder, string? outDir, bool extractAll, bool toPng)
+    {
+        if (!Directory.Exists(folder)) { Console.Error.WriteLine($"error: folder not found: {folder}"); return 2; }
+        outDir ??= Path.Combine(Path.GetFullPath(folder), "_extracted");
+        var files = Directory.EnumerateFiles(folder, "*.jmd", SearchOption.AllDirectories).ToList();
+        Console.WriteLine($"Found {files.Count} .jmd file(s) under {Path.GetFullPath(folder)}");
+        if (files.Count == 0) return 0;
+
+        int done = 0, totalAssets = 0, totalPng = 0, failed = 0;
+        var baseFull = Path.GetFullPath(folder);
+        foreach (var f in files)
         {
-            int png = ConvertDdsToPng(outcome.BinFiles);
-            Console.WriteLine($"  Converted {png} DDS texture(s) to .png.");
+            string rel = Path.GetRelativePath(baseFull, f);
+            string dest = Path.Combine(outDir, Path.ChangeExtension(rel, null)!);
+            try
+            {
+                var r = ExtractCore(f, dest, extractAll, toPng);
+                if (r.Extracted > 0) { totalAssets += r.Extracted; totalPng += r.PngCount; }
+                else if (Directory.Exists(dest)) Directory.Delete(dest, recursive: true); // no empty dirs
+            }
+            catch (Exception ex) { failed++; Console.Error.WriteLine($"  ! {rel}: {ex.Message}"); }
+            done++;
+            if (done % 25 == 0 || done == files.Count)
+                Console.WriteLine($"  [{done}/{files.Count}] {totalAssets} assets, {totalPng} PNG so far...");
         }
-
-        Console.WriteLine($"Manifest: {Path.GetFileName(outcome.ManifestPath)}");
+        Console.WriteLine();
+        Console.WriteLine($"Done. {done} file(s) processed, {failed} failed.");
+        Console.WriteLine($"  {totalAssets} asset(s) extracted, {totalPng} PNG, to:");
+        Console.WriteLine($"  {Path.GetFullPath(outDir)}");
         return 0;
     }
 

@@ -197,8 +197,15 @@ dotnet run --project tools/JmdExtract -c Release -- list  path\to\car.jmd
 
 REM extract embedded files (DDS become real .dds; unknown carves are .bin)
 dotnet run --project tools/JmdExtract -c Release -- extract path\to\car.jmd [outDir]
-dotnet run --project tools/JmdExtract -c Release -- extract path\to\car.jmd outDir --all
+dotnet run --project tools/JmdExtract -c Release -- extract path\to\car.jmd outDir --all --png
+
+REM batch: extract every *.jmd under a folder (recursive), one subfolder per file
+dotnet run --project tools/JmdExtract -c Release -- batch path\to\data [outDir]
 ```
+
+`--png` decodes DXT-compressed DDS textures to universally-viewable `.png`. `batch` turns
+PNG on by default (use `--no-png` to skip) and writes one output subfolder per source file,
+so you can unpack an entire `data/` tree (thousands of `.jmd`) in one command.
 
 By default `extract` keeps assets with a header-derived size (e.g. DDS) plus high-confidence
 matches, skipping noisy 2-byte-magic false positives; `--all` carves every signature; `--png`
@@ -210,8 +217,9 @@ files are complete and openable.
 
 A point-and-click WinForms front-end lives in `tools/JmdExtractApp`. Open a `.jmd` (or drag it
 onto the window), **Scan** to list embedded assets, select a DDS row to see an inline **preview**,
-then **Extract All / Extract Selected** (with an optional "save DDS as PNG"). It builds and
-publishes reliably from the CLI (unlike the WPF app):
+then **Extract All / Extract Selected** (with an optional "save DDS as PNG"). **Batch Folder…**
+unpacks every `.jmd` under a chosen folder in one go. It builds and publishes reliably from the
+CLI (unlike the WPF app):
 
 ```cmd
 dotnet run --project tools/JmdExtractApp -c Release

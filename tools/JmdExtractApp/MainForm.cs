@@ -15,6 +15,7 @@ public sealed class MainForm : Form
 {
     private readonly TextBox _pathBox;
     private readonly Button _openBtn;
+    private readonly Button _batchBtn;
     private readonly Button _scanBtn;
     private readonly Label _infoLabel;
     private readonly DataGridView _grid;
@@ -48,13 +49,16 @@ public sealed class MainForm : Form
         DragEnter += OnDragEnter;
         DragDrop += OnDragDrop;
 
-        // --- Top row: open + path + scan ---
-        _openBtn = MakeButton("Open .jmd…", 12, 12, 110);
+        // --- Top row: open + batch + path + scan ---
+        _openBtn = MakeButton("Open .jmd…", 12, 12, 100);
         _openBtn.Click += (_, _) => PickFile();
+
+        _batchBtn = MakeButton("Batch Folder…", 116, 12, 110);
+        _batchBtn.Click += async (_, _) => await BatchFolderAsync();
 
         _pathBox = new TextBox
         {
-            Left = 130, Top = 14, Width = 640, ReadOnly = true,
+            Left = 234, Top = 14, Width = 536, ReadOnly = true,
             BackColor = BgPanel, ForeColor = Fg, BorderStyle = BorderStyle.FixedSingle,
             Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
         };
@@ -149,7 +153,7 @@ public sealed class MainForm : Form
 
         Controls.AddRange(new Control[]
         {
-            _openBtn, _pathBox, _scanBtn, _infoLabel, _grid, _previewLabel, _previewBox,
+            _openBtn, _batchBtn, _pathBox, _scanBtn, _infoLabel, _grid, _previewLabel, _previewBox,
             _lowConfChk, _pngChk, _extractSelBtn, _extractAllBtn, _progress, _statusLabel
         });
     }
@@ -415,11 +419,105 @@ public sealed class MainForm : Form
         finally { SetBusy(false); }
     }
 
+    // --- Batch folder ---------------------------------------------------
+
+    /// <summary>Recursively extracts every *.jmd under a chosen folder into one subfolder
+    /// each (textures as .dds + .png). Runs off the UI thread with progress.</summary>
+    private async Task BatchFolderAsync()
+    {
+        using var inDlg = new FolderBrowserDialog { Description = "Choose a folder of .jmd files (searched recursively)" };
+        if (inDlg.ShowDialog(this) != DialogResult.OK) return;
+        string inFolder = inDlg.SelectedPath;
+
+        using var outDlg = new FolderBrowserDialog { Description = "Choose the output folder" };
+        if (outDlg.ShowDialog(this) != DialogResult.OK) return;
+        string outRoot = outDlg.SelectedPath;
+
+        SetBusy(true, "Scanning folder…");
+        try
+        {
+            var files = await Task.Run(() =>
+                Directory.EnumerateFiles(inFolder, "*.jmd", SearchOption.AllDirectories).ToList());
+            if (files.Count == 0)
+            {
+                MessageBox.Show(this, "No .jmd files found in that folder.", "Batch",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            var (assets, png, failed) = await Task.Run(() =>
+            {
+                int a = 0, p = 0, fail = 0, done = 0;
+                string baseFull = Path.GetFullPath(inFolder);
+                foreach (var f in files)
+                {
+                    try
+                    {
+                        string rel = Path.GetRelativePath(baseFull, f);
+                        string dest = Path.Combine(outRoot, Path.ChangeExtension(rel, null)!);
+                        var (ex, pc) = ExtractFileToFolder(f, dest);
+                        if (ex > 0) { a += ex; p += pc; }
+                        else if (Directory.Exists(dest)) Directory.Delete(dest, true);
+                    }
+                    catch { fail++; }
+                    done++;
+                    int d = done;
+                    BeginInvoke(() =>
+                    {
+                        _progress.Value = (int)(d * 100.0 / files.Count);
+                        _statusLabel.Text = $"Batch: {d}/{files.Count} files, {a} textures…";
+                    });
+                }
+                return (a, p, fail);
+            });
+
+            _statusLabel.Text = $"Batch done: {assets} texture(s), {png} PNG from {files.Count} file(s).";
+            if (MessageBox.Show(this,
+                    $"Processed {files.Count} .jmd file(s) ({failed} failed).\n" +
+                    $"Extracted {assets} texture(s), {png} PNG to:\n{outRoot}\n\nOpen the folder now?",
+                    "Batch complete", MessageBoxButtons.YesNo, MessageBoxIcon.Information) == DialogResult.Yes)
+                System.Diagnostics.Process.Start("explorer.exe", $"\"{outRoot}\"");
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, "Batch failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+        finally { SetBusy(false); }
+    }
+
+    /// <summary>Extracts useful assets from one .jmd into <paramref name="dest"/>, decoding
+    /// DDS to PNG. Returns (filesExtracted, pngConverted). Used by batch mode.</summary>
+    private static (int extracted, int png) ExtractFileToFolder(string path, string dest)
+    {
+        var scanner = new SignatureScanner();
+        IReadOnlyList<EmbeddedSignatureMatch> matches;
+        long len;
+        using (var fs = File.OpenRead(path)) { len = fs.Length; matches = scanner.Scan(fs, fs.Length); }
+        var useful = matches.Where(m => m.SizeEstimate is > 0 || m.Confidence == Confidence.High).ToList();
+        if (useful.Count == 0) return (0, 0);
+
+        var requests = useful.Select(m =>
+        {
+            bool known = m.SizeEstimate is > 0;
+            long size = known ? m.SizeEstimate!.Value : Math.Min(64 * 1024, len - m.Offset);
+            return new ExtractionRequest
+            {
+                Name = $"{m.Type}_0x{m.Offset:X}",
+                StartOffset = m.Offset,
+                EndOffset = m.Offset + size,
+                Type = $"embedded_signature:{m.Type}",
+                Extension = known ? ExtensionFor(m.Type) : "bin"
+            };
+        }).ToList();
+        var outcome = new RawBlockExtractor().Extract(path, dest, requests, "jmd", null);
+        return (outcome.BinFiles.Count, ConvertDdsToPng(outcome.BinFiles));
+    }
+
     // --- Helpers --------------------------------------------------------
 
     private void SetBusy(bool busy, string? status = null)
     {
-        _openBtn.Enabled = _scanBtn.Enabled = !busy;
+        _openBtn.Enabled = _batchBtn.Enabled = _scanBtn.Enabled = !busy;
         _extractAllBtn.Enabled = _extractSelBtn.Enabled = !busy && _matches.Count > 0;
         _progress.Visible = busy;
         _progress.Value = 0;
