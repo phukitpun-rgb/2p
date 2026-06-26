@@ -1,3 +1,4 @@
+using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
 using JmdExplorer.Core.Services;
@@ -41,6 +42,8 @@ internal static class Cli
                     toPng: !args.Contains("--no-png")),
                 "config" when args.Length >= 2 => Config(
                     args[1], args.Skip(2).FirstOrDefault(a => !a.StartsWith("--"))),
+                "zip" when args.Length >= 2 => Zip(
+                    args[1], args.Skip(2).FirstOrDefault(a => !a.StartsWith("--"))),
                 _ => Fail()
             };
         }
@@ -83,6 +86,10 @@ internal static class Cli
                   --no-png                             Skip DDS->PNG decoding
               jmdextract config  <file.jmd> [outdir]   Export car/stat config blocks as .xml
                                                        (J2m param trees, e.g. ai.jmd)
+              jmdextract zip     <file.jmd> [out.zip]  Convert a .jmd into a .zip containing
+                                                       everything extractable: textures
+                                                       (.dds + .png), car configs (.xml),
+                                                       and other complete assets.
 
             Notes:
               * By default, extract pulls assets with a header-derived size (e.g. DDS)
@@ -302,6 +309,87 @@ internal static class Cli
     {
         var invalid = Path.GetInvalidFileNameChars();
         return new string(name.Select(c => invalid.Contains(c) ? '_' : c).ToArray());
+    }
+
+    /// <summary>Converts a .jmd into a .zip holding everything extractable: textures
+    /// (.dds + decoded .png), car configs (.xml), and other complete assets.</summary>
+    private static int Zip(string path, string? outZip)
+    {
+        if (!File.Exists(path)) throw new FileNotFoundException(null, path);
+        outZip ??= Path.ChangeExtension(Path.GetFullPath(path), ".zip");
+
+        byte[] data = File.ReadAllBytes(path);
+
+        Console.Write("Scanning... ");
+        IReadOnlyList<JmdExplorer.Core.Models.EmbeddedSignatureMatch> matches;
+        using (var ms = new MemoryStream(data, writable: false))
+            matches = new SignatureScanner().Scan(ms, data.Length);
+        // Keep reliable, complete assets. DDS is always trustworthy (size from its header).
+        // Other types are kept only when the parsed size is sane — RIFF/BMP magics in
+        // particular produce huge false-positive "sizes" that would bloat the zip.
+        long cap = Math.Max(4L * 1024 * 1024, data.Length / 20);
+        var useful = matches.Where(m =>
+            m.Type == "DDS"
+                ? m.SizeEstimate is > 0
+                : m.SizeEstimate is > 0 && m.SizeEstimate.Value <= cap
+                  && m.Type is not ("WAV (RIFF)" or "BMP")).ToList();
+        var configs = J2mConfigExtractor.Extract(data);
+        Console.WriteLine($"{matches.Count} signature(s), {useful.Count} asset(s), {configs.Count} config(s).");
+
+        if (File.Exists(outZip)) File.Delete(outZip);
+        int tex = 0, png = 0, raw = 0, cfg = 0;
+        using (var zip = ZipFile.Open(outZip, ZipArchiveMode.Create))
+        {
+            foreach (var m in useful)
+            {
+                bool known = m.SizeEstimate is > 0;
+                long size = known ? m.SizeEstimate!.Value : Math.Min(64 * 1024, data.Length - m.Offset);
+                if (m.Offset + size > data.Length) size = data.Length - m.Offset;
+                var slice = new ReadOnlySpan<byte>(data, (int)m.Offset, (int)size).ToArray();
+
+                string ext = known ? ExtensionFor(m.Type) : "bin";
+                string entry = $"{(m.Type == "DDS" ? "textures" : "assets")}/{m.Type}_0x{m.Offset:X}.{ext}";
+                WriteEntry(zip, entry, slice);
+                if (m.Type == "DDS") tex++; else raw++;
+
+                if (m.Type == "DDS" && DdsImage.IsSupported(slice))
+                {
+                    try
+                    {
+                        var img = DdsImage.Decode(slice);
+                        using var pms = new MemoryStream();
+                        PngWriter.WriteRgba(pms, img.Width, img.Height, img.Rgba);
+                        WriteEntry(zip, $"textures/{m.Type}_0x{m.Offset:X}.png", pms.ToArray());
+                        png++;
+                    }
+                    catch { /* keep the .dds even if decode fails */ }
+                }
+            }
+            foreach (var c in configs)
+            {
+                string baseName = string.IsNullOrWhiteSpace(c.Label) ? $"config_{c.Index:D4}" : Sanitize(c.Label);
+                WriteEntry(zip, $"configs/{baseName}.xml", Encoding.UTF8.GetBytes(c.Xml));
+                cfg++;
+            }
+            string readme =
+                $"Extracted from {Path.GetFileName(path)}\r\n" +
+                $"textures (.dds + .png): {tex}\r\n" +
+                $"other assets: {raw}\r\n" +
+                $"car configs (.xml): {cfg}\r\n" +
+                "Note: texture names are by file offset (the archive stores names hashed/encrypted).\r\n";
+            WriteEntry(zip, "README.txt", Encoding.UTF8.GetBytes(readme));
+        }
+
+        Console.WriteLine($"Wrote {Path.GetFileName(outZip)}: {tex} texture(s) (+{png} PNG), {raw} other, {cfg} config(s).");
+        Console.WriteLine($"  {outZip}");
+        return 0;
+    }
+
+    private static void WriteEntry(ZipArchive zip, string name, byte[] bytes)
+    {
+        var e = zip.CreateEntry(name, CompressionLevel.Optimal);
+        using var s = e.Open();
+        s.Write(bytes, 0, bytes.Length);
     }
 
     /// <summary>Decodes every carved .dds to a sibling .png. Skips unsupported formats.</summary>

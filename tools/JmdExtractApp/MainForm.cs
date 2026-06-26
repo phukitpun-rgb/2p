@@ -1,3 +1,4 @@
+using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
 using JmdExplorer.Core.Models;
@@ -17,6 +18,7 @@ public sealed class MainForm : Form
     private readonly Button _openBtn;
     private readonly Button _batchBtn;
     private readonly Button _configBtn;
+    private readonly Button _zipBtn;
     private readonly Button _scanBtn;
     private readonly Label _infoLabel;
     private readonly DataGridView _grid;
@@ -61,9 +63,13 @@ public sealed class MainForm : Form
         _configBtn.Enabled = false;
         _configBtn.Click += async (_, _) => await ExportConfigsAsync();
 
+        _zipBtn = MakeButton("→ ZIP", 329, 12, 70);
+        _zipBtn.Enabled = false;
+        _zipBtn.Click += async (_, _) => await ConvertToZipAsync();
+
         _pathBox = new TextBox
         {
-            Left = 329, Top = 14, Width = 441, ReadOnly = true,
+            Left = 405, Top = 14, Width = 365, ReadOnly = true,
             BackColor = BgPanel, ForeColor = Fg, BorderStyle = BorderStyle.FixedSingle,
             Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
         };
@@ -158,7 +164,7 @@ public sealed class MainForm : Form
 
         Controls.AddRange(new Control[]
         {
-            _openBtn, _batchBtn, _configBtn, _pathBox, _scanBtn, _infoLabel, _grid, _previewLabel, _previewBox,
+            _openBtn, _batchBtn, _configBtn, _zipBtn, _pathBox, _scanBtn, _infoLabel, _grid, _previewLabel, _previewBox,
             _lowConfChk, _pngChk, _extractSelBtn, _extractAllBtn, _progress, _statusLabel
         });
     }
@@ -206,7 +212,7 @@ public sealed class MainForm : Form
         _matches = Array.Empty<EmbeddedSignatureMatch>();
         _grid.Rows.Clear();
         _extractAllBtn.Enabled = _extractSelBtn.Enabled = false;
-        _scanBtn.Enabled = _configBtn.Enabled = true;
+        _scanBtn.Enabled = _configBtn.Enabled = _zipBtn.Enabled = true;
 
         try
         {
@@ -573,12 +579,110 @@ public sealed class MainForm : Form
         return new string(name.Select(c => invalid.Contains(c) ? '_' : c).ToArray());
     }
 
+    // --- Convert to ZIP -------------------------------------------------
+
+    /// <summary>Bundles everything extractable (textures .dds + .png, car configs .xml,
+    /// other complete assets) from the loaded .jmd into a single .zip.</summary>
+    private async Task ConvertToZipAsync()
+    {
+        if (_filePath is null) return;
+        using var dlg = new SaveFileDialog
+        {
+            Title = "Save .jmd contents as ZIP",
+            Filter = "ZIP archive (*.zip)|*.zip",
+            FileName = Path.GetFileNameWithoutExtension(_filePath) + ".zip"
+        };
+        if (dlg.ShowDialog(this) != DialogResult.OK) return;
+        string outZip = dlg.FileName;
+        string path = _filePath;
+
+        SetBusy(true, "Converting to ZIP…");
+        try
+        {
+            var (tex, png, cfg) = await Task.Run(() => BuildZip(path, outZip));
+            _statusLabel.Text = $"ZIP done: {tex} texture(s), {cfg} config(s).";
+            if (MessageBox.Show(this,
+                    $"Saved {Path.GetFileName(outZip)}:\n" +
+                    $"  {tex} texture(s) (+{png} PNG)\n  {cfg} car config(s)\n\n{outZip}\n\nOpen the folder now?",
+                    "Convert to ZIP complete", MessageBoxButtons.YesNo, MessageBoxIcon.Information) == DialogResult.Yes)
+                System.Diagnostics.Process.Start("explorer.exe", $"/select,\"{outZip}\"");
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, "Convert failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+        finally { SetBusy(false); }
+    }
+
+    private static (int tex, int png, int cfg) BuildZip(string path, string outZip)
+    {
+        byte[] data = File.ReadAllBytes(path);
+        IReadOnlyList<EmbeddedSignatureMatch> matches;
+        using (var ms = new MemoryStream(data, false))
+            matches = new SignatureScanner().Scan(ms, data.Length);
+
+        long cap = Math.Max(4L * 1024 * 1024, data.Length / 20);
+        var useful = matches.Where(m =>
+            m.Type == "DDS"
+                ? m.SizeEstimate is > 0
+                : m.SizeEstimate is > 0 && m.SizeEstimate.Value <= cap
+                  && m.Type is not ("WAV (RIFF)" or "BMP")).ToList();
+        var configs = J2mConfigExtractor.Extract(data);
+
+        if (File.Exists(outZip)) File.Delete(outZip);
+        int tex = 0, png = 0, cfg = 0;
+        using (var zip = ZipFile.Open(outZip, ZipArchiveMode.Create))
+        {
+            foreach (var m in useful)
+            {
+                long size = m.SizeEstimate!.Value;
+                if (m.Offset + size > data.Length) size = data.Length - m.Offset;
+                var slice = new ReadOnlySpan<byte>(data, (int)m.Offset, (int)size).ToArray();
+                string folder = m.Type == "DDS" ? "textures" : "assets";
+                ZipBytes(zip, $"{folder}/{m.Type}_0x{m.Offset:X}.{ExtensionFor(m.Type)}", slice);
+                if (m.Type == "DDS")
+                {
+                    tex++;
+                    if (DdsImage.IsSupported(slice))
+                    {
+                        try
+                        {
+                            var img = DdsImage.Decode(slice);
+                            using var pms = new MemoryStream();
+                            PngWriter.WriteRgba(pms, img.Width, img.Height, img.Rgba);
+                            ZipBytes(zip, $"textures/DDS_0x{m.Offset:X}.png", pms.ToArray());
+                            png++;
+                        }
+                        catch { }
+                    }
+                }
+            }
+            foreach (var c in configs)
+            {
+                string baseName = string.IsNullOrWhiteSpace(c.Label) ? $"config_{c.Index:D4}" : SafeName(c.Label);
+                ZipBytes(zip, $"configs/{baseName}.xml", Encoding.UTF8.GetBytes(c.Xml));
+                cfg++;
+            }
+            ZipBytes(zip, "README.txt", Encoding.UTF8.GetBytes(
+                $"Extracted from {Path.GetFileName(path)}\r\ntextures: {tex}\r\nconfigs: {cfg}\r\n" +
+                "Texture names are by file offset (the archive stores names hashed/encrypted).\r\n"));
+        }
+        return (tex, png, cfg);
+    }
+
+    private static void ZipBytes(ZipArchive zip, string name, byte[] bytes)
+    {
+        var e = zip.CreateEntry(name, CompressionLevel.Optimal);
+        using var s = e.Open();
+        s.Write(bytes, 0, bytes.Length);
+    }
+
     // --- Helpers --------------------------------------------------------
 
     private void SetBusy(bool busy, string? status = null)
     {
         _openBtn.Enabled = _batchBtn.Enabled = _scanBtn.Enabled = !busy;
-        _configBtn.Enabled = !busy && _filePath is not null;
+        _configBtn.Enabled = _zipBtn.Enabled = !busy && _filePath is not null;
         _extractAllBtn.Enabled = _extractSelBtn.Enabled = !busy && _matches.Count > 0;
         _progress.Visible = busy;
         _progress.Value = 0;
