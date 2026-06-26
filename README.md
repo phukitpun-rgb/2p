@@ -201,7 +201,14 @@ dotnet run --project tools/JmdExtract -c Release -- extract path\to\car.jmd outD
 
 REM batch: extract every *.jmd under a folder (recursive), one subfolder per file
 dotnet run --project tools/JmdExtract -c Release -- batch path\to\data [outDir]
+
+REM config: export car/stat config blocks as .xml (J2m "param" trees, e.g. ai.jmd)
+dotnet run --project tools/JmdExtract -c Release -- config path\to\ai.jmd [outDir]
 ```
+
+`config` reconstructs the per-car XML the game tools export — the same `<BD_Mass>`,
+`<defaultPaint>`, `<cameraOffset>` structure — from the serialized property tree stored in
+files like `ai.jmd` (one `.xml` per car, named by its emblem).
 
 `--png` decodes DXT-compressed DDS textures to universally-viewable `.png`. `batch` turns
 PNG on by default (use `--no-png` to skip) and writes one output subfolder per source file,
@@ -218,8 +225,9 @@ files are complete and openable.
 A point-and-click WinForms front-end lives in `tools/JmdExtractApp`. Open a `.jmd` (or drag it
 onto the window), **Scan** to list embedded assets, select a DDS row to see an inline **preview**,
 then **Extract All / Extract Selected** (with an optional "save DDS as PNG"). **Batch Folder…**
-unpacks every `.jmd` under a chosen folder in one go. It builds and publishes reliably from the
-CLI (unlike the WPF app):
+unpacks every `.jmd` under a chosen folder in one go, and **Export XML** writes the car/stat
+config blocks (e.g. from `ai.jmd`) as `.xml`. It builds and publishes reliably from the CLI
+(unlike the WPF app):
 
 ```cmd
 dotnet run --project tools/JmdExtractApp -c Release

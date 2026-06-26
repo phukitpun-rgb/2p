@@ -39,6 +39,8 @@ internal static class Cli
                     args.Skip(2).FirstOrDefault(a => !a.StartsWith("--")),
                     extractAll: args.Contains("--all"),
                     toPng: !args.Contains("--no-png")),
+                "config" when args.Length >= 2 => Config(
+                    args[1], args.Skip(2).FirstOrDefault(a => !a.StartsWith("--"))),
                 _ => Fail()
             };
         }
@@ -79,6 +81,8 @@ internal static class Cli
                                                        DDS->PNG on by default here.
                   --all                                Also carve low-confidence matches
                   --no-png                             Skip DDS->PNG decoding
+              jmdextract config  <file.jmd> [outdir]   Export car/stat config blocks as .xml
+                                                       (J2m param trees, e.g. ai.jmd)
 
             Notes:
               * By default, extract pulls assets with a header-derived size (e.g. DDS)
@@ -259,6 +263,45 @@ internal static class Cli
         Console.WriteLine($"  {totalAssets} asset(s) extracted, {totalPng} PNG, to:");
         Console.WriteLine($"  {Path.GetFullPath(outDir)}");
         return 0;
+    }
+
+    /// <summary>Exports embedded car/stat config blocks (J2m "param" trees) as .xml files.</summary>
+    private static int Config(string path, string? outDir)
+    {
+        if (!File.Exists(path)) throw new FileNotFoundException(null, path);
+        outDir ??= Path.Combine(
+            Path.GetDirectoryName(Path.GetFullPath(path)) ?? ".",
+            Path.GetFileNameWithoutExtension(path) + "_config");
+
+        Console.Write("Reading config tree... ");
+        var configs = J2mConfigExtractor.Extract(File.ReadAllBytes(path));
+        Console.WriteLine($"{configs.Count} config block(s) found.");
+        if (configs.Count == 0)
+        {
+            Console.WriteLine("No 'param' config blocks in this file (try ai.jmd).");
+            return 0;
+        }
+
+        Directory.CreateDirectory(outDir);
+        int written = 0;
+        foreach (var c in configs)
+        {
+            // Name by emblem when available, else by index; keep names unique.
+            string baseName = string.IsNullOrWhiteSpace(c.Label) ? $"config_{c.Index:D4}" : Sanitize(c.Label);
+            string file = Path.Combine(outDir, baseName + ".xml");
+            int dup = 1;
+            while (File.Exists(file)) file = Path.Combine(outDir, $"{baseName}_{dup++}.xml");
+            File.WriteAllText(file, c.Xml, new UTF8Encoding(false));
+            written++;
+        }
+        Console.WriteLine($"Wrote {written} XML file(s) to:\n  {Path.GetFullPath(outDir)}");
+        return 0;
+    }
+
+    private static string Sanitize(string name)
+    {
+        var invalid = Path.GetInvalidFileNameChars();
+        return new string(name.Select(c => invalid.Contains(c) ? '_' : c).ToArray());
     }
 
     /// <summary>Decodes every carved .dds to a sibling .png. Skips unsupported formats.</summary>

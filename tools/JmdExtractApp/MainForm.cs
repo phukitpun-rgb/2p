@@ -16,6 +16,7 @@ public sealed class MainForm : Form
     private readonly TextBox _pathBox;
     private readonly Button _openBtn;
     private readonly Button _batchBtn;
+    private readonly Button _configBtn;
     private readonly Button _scanBtn;
     private readonly Label _infoLabel;
     private readonly DataGridView _grid;
@@ -56,9 +57,13 @@ public sealed class MainForm : Form
         _batchBtn = MakeButton("Batch Folder…", 116, 12, 110);
         _batchBtn.Click += async (_, _) => await BatchFolderAsync();
 
+        _configBtn = MakeButton("Export XML", 230, 12, 95);
+        _configBtn.Enabled = false;
+        _configBtn.Click += async (_, _) => await ExportConfigsAsync();
+
         _pathBox = new TextBox
         {
-            Left = 234, Top = 14, Width = 536, ReadOnly = true,
+            Left = 329, Top = 14, Width = 441, ReadOnly = true,
             BackColor = BgPanel, ForeColor = Fg, BorderStyle = BorderStyle.FixedSingle,
             Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
         };
@@ -153,7 +158,7 @@ public sealed class MainForm : Form
 
         Controls.AddRange(new Control[]
         {
-            _openBtn, _batchBtn, _pathBox, _scanBtn, _infoLabel, _grid, _previewLabel, _previewBox,
+            _openBtn, _batchBtn, _configBtn, _pathBox, _scanBtn, _infoLabel, _grid, _previewLabel, _previewBox,
             _lowConfChk, _pngChk, _extractSelBtn, _extractAllBtn, _progress, _statusLabel
         });
     }
@@ -201,7 +206,7 @@ public sealed class MainForm : Form
         _matches = Array.Empty<EmbeddedSignatureMatch>();
         _grid.Rows.Clear();
         _extractAllBtn.Enabled = _extractSelBtn.Enabled = false;
-        _scanBtn.Enabled = true;
+        _scanBtn.Enabled = _configBtn.Enabled = true;
 
         try
         {
@@ -513,11 +518,67 @@ public sealed class MainForm : Form
         return (outcome.BinFiles.Count, ConvertDdsToPng(outcome.BinFiles));
     }
 
+    // --- Config (XML) export --------------------------------------------
+
+    /// <summary>Exports car/stat config blocks (J2m "param" trees, e.g. in ai.jmd) as .xml files.</summary>
+    private async Task ExportConfigsAsync()
+    {
+        if (_filePath is null) return;
+        using var dlg = new FolderBrowserDialog { Description = "Choose output folder for XML config files" };
+        if (dlg.ShowDialog(this) != DialogResult.OK) return;
+        string outDir = dlg.SelectedPath;
+        string path = _filePath;
+
+        SetBusy(true, "Reading config tree…");
+        try
+        {
+            int written = await Task.Run(() =>
+            {
+                var configs = J2mConfigExtractor.Extract(File.ReadAllBytes(path));
+                Directory.CreateDirectory(outDir);
+                int n = 0;
+                foreach (var c in configs)
+                {
+                    string baseName = string.IsNullOrWhiteSpace(c.Label) ? $"config_{c.Index:D4}" : SafeName(c.Label);
+                    string file = Path.Combine(outDir, baseName + ".xml");
+                    int dup = 1;
+                    while (File.Exists(file)) file = Path.Combine(outDir, $"{baseName}_{dup++}.xml");
+                    File.WriteAllText(file, c.Xml, new UTF8Encoding(false));
+                    n++;
+                }
+                return n;
+            });
+
+            _statusLabel.Text = $"Exported {written} XML config(s).";
+            if (written == 0)
+            {
+                MessageBox.Show(this, "No car/stat config blocks in this file.\n(These live in ai.jmd.)",
+                    "Export XML", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+            if (MessageBox.Show(this, $"Exported {written} XML config file(s) to:\n{outDir}\n\nOpen the folder now?",
+                    "Export XML complete", MessageBoxButtons.YesNo, MessageBoxIcon.Information) == DialogResult.Yes)
+                System.Diagnostics.Process.Start("explorer.exe", $"\"{outDir}\"");
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, "Export failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+        finally { SetBusy(false); }
+    }
+
+    private static string SafeName(string name)
+    {
+        var invalid = Path.GetInvalidFileNameChars();
+        return new string(name.Select(c => invalid.Contains(c) ? '_' : c).ToArray());
+    }
+
     // --- Helpers --------------------------------------------------------
 
     private void SetBusy(bool busy, string? status = null)
     {
         _openBtn.Enabled = _batchBtn.Enabled = _scanBtn.Enabled = !busy;
+        _configBtn.Enabled = !busy && _filePath is not null;
         _extractAllBtn.Enabled = _extractSelBtn.Enabled = !busy && _matches.Count > 0;
         _progress.Visible = busy;
         _progress.Value = 0;
