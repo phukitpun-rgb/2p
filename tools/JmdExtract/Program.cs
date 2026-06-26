@@ -311,12 +311,15 @@ internal static class Cli
         return new string(name.Select(c => invalid.Contains(c) ? '_' : c).ToArray());
     }
 
-    /// <summary>Converts a .jmd into a .zip holding everything extractable: textures
-    /// (.dds + decoded .png), car configs (.xml), and other complete assets.</summary>
+    /// <summary>Converts a .jmd into a .zip holding everything extractable, each file kept
+    /// in its native format (no conversion): textures (.dds), car configs (.xml), and other
+    /// complete assets. Files get simple sequential names (the archive stores no plaintext
+    /// names — they are hashed/encrypted).</summary>
     private static int Zip(string path, string? outZip)
     {
         if (!File.Exists(path)) throw new FileNotFoundException(null, path);
         outZip ??= Path.ChangeExtension(Path.GetFullPath(path), ".zip");
+        string baseName = Path.GetFileNameWithoutExtension(path);
 
         byte[] data = File.ReadAllBytes(path);
 
@@ -337,50 +340,41 @@ internal static class Cli
         Console.WriteLine($"{matches.Count} signature(s), {useful.Count} asset(s), {configs.Count} config(s).");
 
         if (File.Exists(outZip)) File.Delete(outZip);
-        int tex = 0, png = 0, raw = 0, cfg = 0;
+        int tex = 0, raw = 0, cfg = 0;
+        var seq = new Dictionary<string, int>();
         using (var zip = ZipFile.Open(outZip, ZipArchiveMode.Create))
         {
             foreach (var m in useful)
             {
-                bool known = m.SizeEstimate is > 0;
-                long size = known ? m.SizeEstimate!.Value : Math.Min(64 * 1024, data.Length - m.Offset);
+                long size = m.SizeEstimate!.Value;
                 if (m.Offset + size > data.Length) size = data.Length - m.Offset;
                 var slice = new ReadOnlySpan<byte>(data, (int)m.Offset, (int)size).ToArray();
 
-                string ext = known ? ExtensionFor(m.Type) : "bin";
-                string entry = $"{(m.Type == "DDS" ? "textures" : "assets")}/{m.Type}_0x{m.Offset:X}.{ext}";
-                WriteEntry(zip, entry, slice);
+                string ext = ExtensionFor(m.Type);
+                string folder = m.Type == "DDS" ? "textures" : "assets";
+                int n = seq.TryGetValue(ext, out var v) ? v + 1 : 1; seq[ext] = n;
+                // Native format, simple sequential readable name (e.g. tree_0001.dds).
+                WriteEntry(zip, $"{folder}/{baseName}_{n:D4}.{ext}", slice);
                 if (m.Type == "DDS") tex++; else raw++;
-
-                if (m.Type == "DDS" && DdsImage.IsSupported(slice))
-                {
-                    try
-                    {
-                        var img = DdsImage.Decode(slice);
-                        using var pms = new MemoryStream();
-                        PngWriter.WriteRgba(pms, img.Width, img.Height, img.Rgba);
-                        WriteEntry(zip, $"textures/{m.Type}_0x{m.Offset:X}.png", pms.ToArray());
-                        png++;
-                    }
-                    catch { /* keep the .dds even if decode fails */ }
-                }
             }
             foreach (var c in configs)
             {
-                string baseName = string.IsNullOrWhiteSpace(c.Label) ? $"config_{c.Index:D4}" : Sanitize(c.Label);
-                WriteEntry(zip, $"configs/{baseName}.xml", Encoding.UTF8.GetBytes(c.Xml));
+                // Configs carry a readable emblem name; fall back to a sequential number.
+                string name = string.IsNullOrWhiteSpace(c.Label) ? $"{baseName}_config_{c.Index:D4}" : Sanitize(c.Label);
+                WriteEntry(zip, $"configs/{name}.xml", Encoding.UTF8.GetBytes(c.Xml));
                 cfg++;
             }
             string readme =
                 $"Extracted from {Path.GetFileName(path)}\r\n" +
-                $"textures (.dds + .png): {tex}\r\n" +
+                $"textures (.dds): {tex}\r\n" +
                 $"other assets: {raw}\r\n" +
                 $"car configs (.xml): {cfg}\r\n" +
-                "Note: texture names are by file offset (the archive stores names hashed/encrypted).\r\n";
+                "Files keep their native format. Names are sequential because the archive\r\n" +
+                "stores its internal names hashed/encrypted (not as plain text).\r\n";
             WriteEntry(zip, "README.txt", Encoding.UTF8.GetBytes(readme));
         }
 
-        Console.WriteLine($"Wrote {Path.GetFileName(outZip)}: {tex} texture(s) (+{png} PNG), {raw} other, {cfg} config(s).");
+        Console.WriteLine($"Wrote {Path.GetFileName(outZip)}: {tex} texture(s), {raw} other, {cfg} config(s).");
         Console.WriteLine($"  {outZip}");
         return 0;
     }

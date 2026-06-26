@@ -136,7 +136,7 @@ public sealed class MainForm : Form
 
         _pngChk = new CheckBox
         {
-            Text = "Also save DDS as PNG", Left = 270, Top = 532, Width = 200, Checked = true,
+            Text = "Also save DDS as PNG", Left = 270, Top = 532, Width = 200, Checked = false,
             ForeColor = Fg, Anchor = AnchorStyles.Bottom | AnchorStyles.Left
         };
 
@@ -599,11 +599,11 @@ public sealed class MainForm : Form
         SetBusy(true, "Converting to ZIP…");
         try
         {
-            var (tex, png, cfg) = await Task.Run(() => BuildZip(path, outZip));
+            var (tex, _, cfg) = await Task.Run(() => BuildZip(path, outZip));
             _statusLabel.Text = $"ZIP done: {tex} texture(s), {cfg} config(s).";
             if (MessageBox.Show(this,
                     $"Saved {Path.GetFileName(outZip)}:\n" +
-                    $"  {tex} texture(s) (+{png} PNG)\n  {cfg} car config(s)\n\n{outZip}\n\nOpen the folder now?",
+                    $"  {tex} texture(s) (.dds, native format)\n  {cfg} car config(s) (.xml)\n\n{outZip}\n\nOpen the folder now?",
                     "Convert to ZIP complete", MessageBoxButtons.YesNo, MessageBoxIcon.Information) == DialogResult.Yes)
                 System.Diagnostics.Process.Start("explorer.exe", $"/select,\"{outZip}\"");
         }
@@ -617,6 +617,7 @@ public sealed class MainForm : Form
     private static (int tex, int png, int cfg) BuildZip(string path, string outZip)
     {
         byte[] data = File.ReadAllBytes(path);
+        string baseName = Path.GetFileNameWithoutExtension(path);
         IReadOnlyList<EmbeddedSignatureMatch> matches;
         using (var ms = new MemoryStream(data, false))
             matches = new SignatureScanner().Scan(ms, data.Length);
@@ -630,7 +631,8 @@ public sealed class MainForm : Form
         var configs = J2mConfigExtractor.Extract(data);
 
         if (File.Exists(outZip)) File.Delete(outZip);
-        int tex = 0, png = 0, cfg = 0;
+        int tex = 0, cfg = 0;
+        var seq = new Dictionary<string, int>();
         using (var zip = ZipFile.Open(outZip, ZipArchiveMode.Create))
         {
             foreach (var m in useful)
@@ -638,36 +640,24 @@ public sealed class MainForm : Form
                 long size = m.SizeEstimate!.Value;
                 if (m.Offset + size > data.Length) size = data.Length - m.Offset;
                 var slice = new ReadOnlySpan<byte>(data, (int)m.Offset, (int)size).ToArray();
+                string ext = ExtensionFor(m.Type);
                 string folder = m.Type == "DDS" ? "textures" : "assets";
-                ZipBytes(zip, $"{folder}/{m.Type}_0x{m.Offset:X}.{ExtensionFor(m.Type)}", slice);
-                if (m.Type == "DDS")
-                {
-                    tex++;
-                    if (DdsImage.IsSupported(slice))
-                    {
-                        try
-                        {
-                            var img = DdsImage.Decode(slice);
-                            using var pms = new MemoryStream();
-                            PngWriter.WriteRgba(pms, img.Width, img.Height, img.Rgba);
-                            ZipBytes(zip, $"textures/DDS_0x{m.Offset:X}.png", pms.ToArray());
-                            png++;
-                        }
-                        catch { }
-                    }
-                }
+                int n = seq.TryGetValue(ext, out var v) ? v + 1 : 1; seq[ext] = n;
+                // Native format kept as-is; simple sequential readable name.
+                ZipBytes(zip, $"{folder}/{baseName}_{n:D4}.{ext}", slice);
+                if (m.Type == "DDS") tex++;
             }
             foreach (var c in configs)
             {
-                string baseName = string.IsNullOrWhiteSpace(c.Label) ? $"config_{c.Index:D4}" : SafeName(c.Label);
-                ZipBytes(zip, $"configs/{baseName}.xml", Encoding.UTF8.GetBytes(c.Xml));
+                string name = string.IsNullOrWhiteSpace(c.Label) ? $"{baseName}_config_{c.Index:D4}" : SafeName(c.Label);
+                ZipBytes(zip, $"configs/{name}.xml", Encoding.UTF8.GetBytes(c.Xml));
                 cfg++;
             }
             ZipBytes(zip, "README.txt", Encoding.UTF8.GetBytes(
-                $"Extracted from {Path.GetFileName(path)}\r\ntextures: {tex}\r\nconfigs: {cfg}\r\n" +
-                "Texture names are by file offset (the archive stores names hashed/encrypted).\r\n"));
+                $"Extracted from {Path.GetFileName(path)}\r\ntextures (.dds): {tex}\r\nconfigs (.xml): {cfg}\r\n" +
+                "Files keep their native format; names are sequential (archive names are hashed/encrypted).\r\n"));
         }
-        return (tex, png, cfg);
+        return (tex, 0, cfg);
     }
 
     private static void ZipBytes(ZipArchive zip, string name, byte[] bytes)
