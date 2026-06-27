@@ -19,6 +19,7 @@ public sealed class MainForm : Form
     private readonly Button _batchBtn;
     private readonly Button _configBtn;
     private readonly Button _zipBtn;
+    private readonly Button _namesBtn;
     private readonly Button _scanBtn;
     private readonly Label _infoLabel;
     private readonly DataGridView _grid;
@@ -67,9 +68,13 @@ public sealed class MainForm : Form
         _zipBtn.Enabled = false;
         _zipBtn.Click += async (_, _) => await ConvertToZipAsync();
 
+        _namesBtn = MakeButton("Real Names…", 403, 12, 95);
+        _namesBtn.Enabled = false;
+        _namesBtn.Click += async (_, _) => await ExtractRealNamesAsync();
+
         _pathBox = new TextBox
         {
-            Left = 405, Top = 14, Width = 365, ReadOnly = true,
+            Left = 503, Top = 14, Width = 267, ReadOnly = true,
             BackColor = BgPanel, ForeColor = Fg, BorderStyle = BorderStyle.FixedSingle,
             Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
         };
@@ -164,7 +169,7 @@ public sealed class MainForm : Form
 
         Controls.AddRange(new Control[]
         {
-            _openBtn, _batchBtn, _configBtn, _zipBtn, _pathBox, _scanBtn, _infoLabel, _grid, _previewLabel, _previewBox,
+            _openBtn, _batchBtn, _configBtn, _zipBtn, _namesBtn, _pathBox, _scanBtn, _infoLabel, _grid, _previewLabel, _previewBox,
             _lowConfChk, _pngChk, _extractSelBtn, _extractAllBtn, _progress, _statusLabel
         });
     }
@@ -212,7 +217,7 @@ public sealed class MainForm : Form
         _matches = Array.Empty<EmbeddedSignatureMatch>();
         _grid.Rows.Clear();
         _extractAllBtn.Enabled = _extractSelBtn.Enabled = false;
-        _scanBtn.Enabled = _configBtn.Enabled = _zipBtn.Enabled = true;
+        _scanBtn.Enabled = _configBtn.Enabled = _zipBtn.Enabled = _namesBtn.Enabled = true;
 
         try
         {
@@ -579,6 +584,88 @@ public sealed class MainForm : Form
         return new string(name.Select(c => invalid.Contains(c) ? '_' : c).ToArray());
     }
 
+    // --- Real names (from memory dump) ----------------------------------
+
+    /// <summary>Extracts DDS textures with their REAL names, read from a memory dump of the
+    /// official XenonFileSystem tool (file open + list fully scrolled before dumping).</summary>
+    private async Task ExtractRealNamesAsync()
+    {
+        if (_filePath is null) return;
+        MessageBox.Show(this,
+            "Real names come from a memory dump of the official XenonFileSystem tool.\n\n" +
+            "First: open this .jmd in that tool, scroll the whole list top-to-bottom, then\n" +
+            "create a dump (Task Manager → Details → right-click → Create dump file).\n\n" +
+            "Next, pick that .DMP file.",
+            "Real names — how it works", MessageBoxButtons.OK, MessageBoxIcon.Information);
+
+        using var dumpDlg = new OpenFileDialog { Title = "Pick the memory dump", Filter = "Dump (*.dmp)|*.dmp|All files (*.*)|*.*" };
+        if (dumpDlg.ShowDialog(this) != DialogResult.OK) return;
+        using var outDlg = new FolderBrowserDialog { Description = "Choose output folder" };
+        if (outDlg.ShowDialog(this) != DialogResult.OK) return;
+        string dumpPath = dumpDlg.FileName, outDir = outDlg.SelectedPath, jmdPath = _filePath;
+
+        SetBusy(true, "Reading dump & resolving real names…");
+        try
+        {
+            var (total, named) = await Task.Run(() =>
+            {
+                byte[] jmd = File.ReadAllBytes(jmdPath);
+                byte[] dump = File.ReadAllBytes(dumpPath);
+                var off2name = DumpNameResolver.ResolveDdsNames(jmd, dump);
+                Directory.CreateDirectory(outDir);
+                var used = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                int tot = 0, nm = 0, seqn = 0;
+                foreach (long off in EnumDds(jmd))
+                {
+                    long size = DdsByteSize(jmd, off);
+                    if (size <= 0 || off + size > jmd.Length) continue;
+                    tot++;
+                    string baseName = off2name.TryGetValue(off, out var rn) ? SafeName(rn) : $"texture_{++seqn:D4}";
+                    if (off2name.ContainsKey(off)) nm++;
+                    string file = baseName + ".dds";
+                    int dup = 1;
+                    while (used.Contains(file)) file = $"{baseName}_{dup++}.dds";
+                    used.Add(file);
+                    File.WriteAllBytes(Path.Combine(outDir, file),
+                        new ReadOnlySpan<byte>(jmd, (int)off, (int)size).ToArray());
+                }
+                return (tot, nm);
+            });
+
+            _statusLabel.Text = $"Real names: {named}/{total} textures named.";
+            if (MessageBox.Show(this,
+                    $"Extracted {total} DDS texture(s).\nReal names matched: {named} (rest numbered).\n\n{outDir}\n\nOpen folder?",
+                    "Real-name extraction complete", MessageBoxButtons.YesNo, MessageBoxIcon.Information) == DialogResult.Yes)
+                System.Diagnostics.Process.Start("explorer.exe", $"\"{outDir}\"");
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, "Failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+        finally { SetBusy(false); }
+    }
+
+    private static IEnumerable<long> EnumDds(byte[] d)
+    {
+        for (int i = 0; i + 4 <= d.Length; i++)
+            if (d[i] == 'D' && d[i + 1] == 'D' && d[i + 2] == 'S' && d[i + 3] == ' ') yield return i;
+    }
+
+    private static long DdsByteSize(byte[] d, long o)
+    {
+        if (BitConverter.ToUInt32(d, (int)o + 4) != 124) return 0;
+        uint h = BitConverter.ToUInt32(d, (int)o + 12), w = BitConverter.ToUInt32(d, (int)o + 16);
+        uint mips = BitConverter.ToUInt32(d, (int)o + 28); if (mips == 0) mips = 1;
+        int blk = Encoding.ASCII.GetString(d, (int)o + 84, 4) == "DXT1" ? 8 : 16;
+        long t = 128;
+        for (int m = 0; m < mips; m++)
+        {
+            long mw = Math.Max(1, w >> m), mh = Math.Max(1, h >> m);
+            t += ((mw + 3) / 4) * ((mh + 3) / 4) * blk;
+        }
+        return t;
+    }
+
     // --- Convert to ZIP -------------------------------------------------
 
     /// <summary>Bundles everything extractable (textures .dds + .png, car configs .xml,
@@ -672,7 +759,7 @@ public sealed class MainForm : Form
     private void SetBusy(bool busy, string? status = null)
     {
         _openBtn.Enabled = _batchBtn.Enabled = _scanBtn.Enabled = !busy;
-        _configBtn.Enabled = _zipBtn.Enabled = !busy && _filePath is not null;
+        _configBtn.Enabled = _zipBtn.Enabled = _namesBtn.Enabled = !busy && _filePath is not null;
         _extractAllBtn.Enabled = _extractSelBtn.Enabled = !busy && _matches.Count > 0;
         _progress.Visible = busy;
         _progress.Value = 0;

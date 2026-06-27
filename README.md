@@ -207,7 +207,19 @@ dotnet run --project tools/JmdExtract -c Release -- config path\to\ai.jmd [outDi
 
 REM zip: convert a .jmd into a .zip containing everything extractable
 dotnet run --project tools/JmdExtract -c Release -- zip path\to\plate.jmd [out.zip]
+
+REM names: extract DDS textures with their REAL names, recovered from a memory dump
+REM of the official tool (open the file there, scroll the whole list, then dump it)
+dotnet run --project tools/JmdExtract -c Release -- names path\to\plate.jmd dump.dmp [outDir]
 ```
+
+`names` is the optional "real names" path. The archive stores its internal names
+hashed/encrypted, so they can't be recovered from the .jmd alone — but the official
+XenonFileSystem tool decrypts them into memory. Open the .jmd there, scroll the list
+top-to-bottom (so every row loads), create a process dump, and this command reads the
+decrypted name table from the dump to give each extracted texture its real name
+(verified: e.g. `common_plate_show_k.dds` is the "Shout!" plate). The GUI exposes the
+same thing via the **Real Names…** button.
 
 `zip` is the one-shot "unpack it all" option: it writes a `.zip` with `textures/` (every DDS
 as both `.dds` and decoded `.png`), `configs/` (car `.xml` blocks), and any other complete

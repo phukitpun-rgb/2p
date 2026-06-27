@@ -44,6 +44,8 @@ internal static class Cli
                     args[1], args.Skip(2).FirstOrDefault(a => !a.StartsWith("--"))),
                 "zip" when args.Length >= 2 => Zip(
                     args[1], args.Skip(2).FirstOrDefault(a => !a.StartsWith("--"))),
+                "names" when args.Length >= 3 => Names(
+                    args[1], args[2], args.Skip(3).FirstOrDefault(a => !a.StartsWith("--"))),
                 _ => Fail()
             };
         }
@@ -88,8 +90,13 @@ internal static class Cli
                                                        (J2m param trees, e.g. ai.jmd)
               jmdextract zip     <file.jmd> [out.zip]  Convert a .jmd into a .zip containing
                                                        everything extractable: textures
-                                                       (.dds + .png), car configs (.xml),
-                                                       and other complete assets.
+                                                       (.dds), car configs (.xml), and other
+                                                       complete assets (native format).
+              jmdextract names   <file.jmd> <dump.dmp> [outdir]
+                                                       Extract DDS textures with their REAL
+                                                       names, recovered from a memory dump of
+                                                       the official tool (file open + list
+                                                       fully scrolled).
 
             Notes:
               * By default, extract pulls assets with a header-derived size (e.g. DDS)
@@ -384,6 +391,68 @@ internal static class Cli
         var e = zip.CreateEntry(name, CompressionLevel.Optimal);
         using var s = e.Open();
         s.Write(bytes, 0, bytes.Length);
+    }
+
+    /// <summary>Extracts DDS textures with their REAL names, recovered from a memory dump of
+    /// the official XenonFileSystem tool (taken with the file open and the list fully scrolled).</summary>
+    private static int Names(string jmdPath, string dumpPath, string? outDir)
+    {
+        if (!File.Exists(jmdPath)) throw new FileNotFoundException(null, jmdPath);
+        if (!File.Exists(dumpPath)) throw new FileNotFoundException(null, dumpPath);
+        outDir ??= Path.Combine(
+            Path.GetDirectoryName(Path.GetFullPath(jmdPath)) ?? ".",
+            Path.GetFileNameWithoutExtension(jmdPath) + "_named");
+
+        Console.Write("Reading dump and resolving names... ");
+        byte[] jmd = File.ReadAllBytes(jmdPath);
+        byte[] dump = File.ReadAllBytes(dumpPath);
+        var off2name = DumpNameResolver.ResolveDdsNames(jmd, dump);
+        Console.WriteLine($"{off2name.Count} name(s) resolved.");
+
+        Directory.CreateDirectory(outDir);
+        var used = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        int named = 0, seqn = 0, total = 0;
+        foreach (long off in FindDds(jmd))
+        {
+            long size = DdsSize(jmd, off);
+            if (size <= 0 || off + size > jmd.Length) continue;
+            total++;
+            string baseName = off2name.TryGetValue(off, out var nm) ? Sanitize(nm) : $"texture_{++seqn:D4}";
+            if (off2name.ContainsKey(off)) named++;
+            string file = baseName + ".dds";
+            int dup = 1;
+            while (used.Contains(file)) file = $"{baseName}_{dup++}.dds";
+            used.Add(file);
+            File.WriteAllBytes(Path.Combine(outDir, file),
+                new ReadOnlySpan<byte>(jmd, (int)off, (int)size).ToArray());
+        }
+        Console.WriteLine($"Extracted {total} DDS to:\n  {Path.GetFullPath(outDir)}");
+        Console.WriteLine($"  real names: {named}, sequential fallback: {seqn}");
+        return 0;
+    }
+
+    private static List<long> FindDds(byte[] d)
+    {
+        var o = new List<long>();
+        for (int i = 0; i + 4 <= d.Length; i++)
+            if (d[i] == 'D' && d[i + 1] == 'D' && d[i + 2] == 'S' && d[i + 3] == ' ') o.Add(i);
+        return o;
+    }
+
+    private static long DdsSize(byte[] d, long o)
+    {
+        if (BitConverter.ToUInt32(d, (int)o + 4) != 124) return 0;
+        uint h = BitConverter.ToUInt32(d, (int)o + 12), w = BitConverter.ToUInt32(d, (int)o + 16);
+        uint mips = BitConverter.ToUInt32(d, (int)o + 28); if (mips == 0) mips = 1;
+        string fourcc = Encoding.ASCII.GetString(d, (int)o + 84, 4);
+        int blk = fourcc == "DXT1" ? 8 : 16;
+        long t = 128;
+        for (int m = 0; m < mips; m++)
+        {
+            long mw = Math.Max(1, w >> m), mh = Math.Max(1, h >> m);
+            t += ((mw + 3) / 4) * ((mh + 3) / 4) * blk;
+        }
+        return t;
     }
 
     /// <summary>Decodes every carved .dds to a sibling .png. Skips unsupported formats.</summary>
